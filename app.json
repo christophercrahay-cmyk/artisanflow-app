@@ -12,6 +12,19 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "ndkVersion": "24.0.8215888"
+          }
+        }
+      ]
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -20,7 +33,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "L'application enregistre des notes vocales de chantier."
+        "NSMicrophoneUsageDescription": "L'application enregistre des notes vocales de chantier.",
+        "NSCameraUsageDescription": "L'application prend des photos pour documenter vos chantiers."
       }
     },
     "android": {
@@ -30,8 +44,10 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
-        "RECORD_AUDIO"
-      ]
+        "RECORD_AUDIO",
+        "CAMERA"
+      ],
+      "package": "com.artisanflow"
     },
     "web": {
       "favicon": "./assets/favicon.png"
