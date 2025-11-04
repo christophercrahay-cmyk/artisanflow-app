@@ -12,14 +12,25 @@ import {
 import { Audio } from 'expo-av';
 import { supabase } from './supabaseClient';
 import * as FileSystem from 'expo-file-system';
+import { useAppStore } from './store/useAppStore';
 
 // Whisper.rn est un module natif - pas disponible dans Expo Go
 let initWhisper = null;
+let isWhisperAvailable = false;
 try {
+  // Import dynamique pour éviter les warnings de résolution de module
   const whisperModule = require('whisper.rn');
-  initWhisper = whisperModule.initWhisper;
+  if (whisperModule && whisperModule.initWhisper) {
+    initWhisper = whisperModule.initWhisper;
+    isWhisperAvailable = true;
+    console.log('[DevisFactures] ✅ Whisper.rn disponible - Transcription activée');
+  }
 } catch (e) {
-  console.warn('[DevisFactures] Whisper.rn non disponible (Expo Go)');
+  // Normal en Expo Go - le module natif n'est pas disponible
+  // Silencieux en production pour éviter les warnings inutiles
+  if (__DEV__) {
+    console.warn('[DevisFactures] ⚠️ Whisper.rn non disponible (Expo Go) - Transcription désactivée');
+  }
 }
 
 export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
@@ -69,10 +80,15 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
       
-      if (error) throw error;
+      if (error) {
+        console.error(`Erreur chargement ${type}:`, error);
+        Alert.alert('Erreur', `Impossible de charger les ${type}s`);
+        return;
+      }
       setItems(data || []);
     } catch (err) {
-      console.error(`Erreur chargement ${type}:`, err);
+      console.error(`Exception chargement ${type}:`, err);
+      Alert.alert('Erreur', `Erreur lors du chargement des ${type}s`);
     }
   };
 
@@ -102,21 +118,39 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
   };
 
   const saveItem = async () => {
-    if (!numero.trim() || !montant.trim()) {
-      Alert.alert('Champs requis', 'Numéro et montant sont obligatoires.');
+    if (!numero.trim()) {
+      Alert.alert('Champs requis', 'Le numéro est obligatoire.');
+      return;
+    }
+    
+    const montantHT = parseFloat(montant);
+    if (isNaN(montantHT) || montantHT <= 0) {
+      Alert.alert('Montant invalide', 'Le montant doit être supérieur à 0.');
+      return;
+    }
+
+    // Vérifier les sélections dans le store
+    const { currentClient, currentProject } = useAppStore.getState();
+    if (!currentClient?.id) {
+      Alert.alert('Client manquant', 'Sélectionne un client');
       return;
     }
 
     try {
       setUploading(true);
-      const montantHT = parseFloat(montant) || 0;
+      
+      // Récupérer l'utilisateur connecté pour RLS
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Utilisateur non authentifié');
+      
       const tvaPercent = parseFloat(tva) || 0;
       const montantTTC = montantHT * (1 + tvaPercent / 100);
 
       const tableName = isDevis ? 'devis' : 'factures';
       const data = {
-        project_id: projectId,
-        client_id: clientId,
+        project_id: currentProject?.id ?? null,
+        client_id: currentClient.id,
+        user_id: user.id, // Nécessaire pour RLS
         numero: numero.trim(),
         montant_ht: montantHT,
         tva_percent: tvaPercent,
@@ -171,7 +205,10 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
       });
 
       const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        // Options audio standard - expo-av gère mieux avec des valeurs standard
+        await recording.prepareToRecordAsync(
+          Audio.RecordingOptionsPresets.HIGH_QUALITY
+        );
       await recording.startAsync();
       setRecording(recording);
     } catch (e) {
@@ -193,7 +230,9 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
       if (initWhisper) {
         try {
           if (!whisperContextRef.current) {
-            const modelName = 'ggml-tiny.en.bin';
+            // Modèle ggml-base.bin : plus précis pour le français (140MB vs 75MB pour tiny)
+            // Le modèle "base" est beaucoup plus fiable pour distinguer voix vs bruits
+            const modelName = 'ggml-base.bin';
             const modelDir = `${FileSystem.documentDirectory}whisper/`;
             const modelPath = `${modelDir}${modelName}`;
             
@@ -204,8 +243,12 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
             
             const modelInfo = await FileSystem.getInfoAsync(modelPath);
             if (!modelInfo.exists) {
-              const modelUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin';
+              console.log('[DevisFactures] 📥 Téléchargement du modèle Whisper ggml-base.bin (140MB - plus précis pour le français)...');
+              const modelUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin';
               await FileSystem.downloadAsync(modelUrl, modelPath);
+              console.log('[DevisFactures] ✅ Modèle téléchargé');
+            } else {
+              console.log('[DevisFactures] ✅ Modèle ggml-base.bin déjà présent');
             }
 
             whisperContextRef.current = await initWhisper({
@@ -214,10 +257,38 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
             });
           }
 
-          const { promise } = whisperContextRef.current.transcribe(uri, { language: 'en' });
+          const { promise } = whisperContextRef.current.transcribe(uri, { language: 'fr' });
           const result = await promise;
           transcribedText = result.result || '';
-          setTranscription(transcribedText);
+            
+            // Filtrer les transcriptions invalides (bruits, sons non-parlés)
+            if (transcribedText && transcribedText.trim()) {
+              const cleanText = transcribedText.trim();
+              
+              // Rejeter les transcriptions entre crochets (bruits non-parlés comme [BANG], [Musique], etc.)
+              const isBracketedNoise = /^\[.+\]$/.test(cleanText);
+              
+              // Rejeter si trop court ou uniquement des ponctuations
+              const isTooShort = cleanText.length < 3;
+              const isOnlyPunctuation = /^[^\w\s]*$/.test(cleanText);
+              
+              // Liste de mots de bruit connus que Whisper peut transcrire (même sans crochets)
+              const noiseWords = ['bang', 'clap', 'tap', 'click', 'beep', 'buzz', 'hum', 'hiss'];
+              const isNoiseWord = noiseWords.some(noise => cleanText.toLowerCase() === noise);
+              
+              const hasValidContent = !isBracketedNoise && !isTooShort && !isOnlyPunctuation && !isNoiseWord;
+              
+              if (hasValidContent) {
+                setTranscription(cleanText);
+              } else {
+                console.warn('[DevisFactures] Transcription invalide rejetée:', cleanText);
+                Alert.alert(
+                  'Transcription invalide',
+                  `La transcription obtenue semble être un bruit ou un son non-parlé: "${cleanText}"\n\nVous pouvez l'ignorer ou transcrire manuellement.`
+                );
+                transcribedText = ''; // Ne pas utiliser cette transcription
+              }
+            }
         } catch (transcribeErr) {
           console.error('Erreur transcription:', transcribeErr);
         }
@@ -242,9 +313,16 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
           try {
             const tableName = isDevis ? 'devis' : 'factures';
             const { error } = await supabase.from(tableName).delete().eq('id', id);
-            if (!error) await loadItems();
+            if (error) {
+              console.error(`Erreur suppression ${type}:`, error);
+              Alert.alert('Erreur', `Impossible de supprimer le ${type}`);
+              return;
+            }
+            await loadItems();
+            Alert.alert('OK', `${isDevis ? 'Devis' : 'Facture'} supprimé(e) ✅`);
           } catch (err) {
-            console.error(`Erreur suppression ${type}:`, err);
+            console.error(`Exception suppression ${type}:`, err);
+            Alert.alert('Erreur', 'Erreur lors de la suppression');
           }
         },
       },
@@ -310,6 +388,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
           <TextInput
             style={styles.input}
             placeholder="Numéro"
+            placeholderTextColor="#9CA3AF"
             value={numero}
             onChangeText={setNumero}
             editable={!editingId}
@@ -319,6 +398,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
             <TextInput
               style={[styles.input, { flex: 2 }]}
               placeholder="Montant HT (€)"
+              placeholderTextColor="#9CA3AF"
               value={montant}
               onChangeText={setMontant}
               keyboardType="numeric"
@@ -326,6 +406,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
             <TextInput
               style={[styles.input, { flex: 1 }]}
               placeholder="TVA %"
+              placeholderTextColor="#9CA3AF"
               value={tva}
               onChangeText={setTva}
               keyboardType="numeric"
@@ -341,6 +422,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
           <TextInput
             style={styles.input}
             placeholder={isDevis ? 'Date validité (YYYY-MM-DD)' : 'Date échéance (YYYY-MM-DD)'}
+            placeholderTextColor="#9CA3AF"
             value={dateValidite}
             onChangeText={setDateValidite}
           />
@@ -365,6 +447,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder="Notes"
+            placeholderTextColor="#9CA3AF"
             value={notes}
             onChangeText={setNotes}
             multiline
@@ -379,9 +462,16 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
           )}
 
           <View style={styles.voiceRow}>
+            {!isWhisperAvailable && (
+              <Text style={styles.whisperWarning}>
+                ⚠️ Transcription désactivée (Expo Go). Build natif requis pour activer.
+              </Text>
+            )}
             {!recording ? (
               <TouchableOpacity onPress={startRecording} style={styles.voiceBtn}>
-                <Text style={styles.voiceBtnText}>🎙️ Enregistrer note vocale</Text>
+                <Text style={styles.voiceBtnText}>
+                  🎙️ {isWhisperAvailable ? 'Enregistrer note vocale' : 'Enregistrer (sans transcription)'}
+                </Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity onPress={stopRecording} style={[styles.voiceBtn, styles.voiceBtnStop]}>
@@ -392,7 +482,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
 
           {transcribing && (
             <View style={styles.transcribingContainer}>
-              <ActivityIndicator size="small" color="#1D4ED8" />
+              <ActivityIndicator size="small" color="#60A5FA" />
               <Text style={styles.transcribingText}>Transcription en cours...</Text>
             </View>
           )}
@@ -431,42 +521,43 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
 }
 
 const styles = StyleSheet.create({
-  container: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderColor: '#eee' },
+  container: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderColor: '#2A2E35' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  title: { fontSize: 18, fontWeight: '800' },
+  title: { fontSize: 18, fontWeight: '800', color: '#EAEAEA' },
   addBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1D4ED8', alignItems: 'center', justifyContent: 'center' },
   addBtnText: { color: '#fff', fontSize: 24, fontWeight: '700' },
-  form: { backgroundColor: '#F9FAFB', padding: 16, borderRadius: 12, marginBottom: 16 },
-  input: { height: 48, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, marginBottom: 12, backgroundColor: '#fff' },
+  form: { backgroundColor: '#1A1D22', padding: 16, borderRadius: 12, marginBottom: 16 },
+  input: { height: 48, borderWidth: 1, borderColor: '#374151', borderRadius: 8, paddingHorizontal: 12, marginBottom: 12, backgroundColor: '#0F1115', color: '#EAEAEA' },
   row: { flexDirection: 'row', gap: 8 },
   textArea: { height: 100, textAlignVertical: 'top' },
-  montantTTC: { fontSize: 16, fontWeight: '700', color: '#1D4ED8', marginBottom: 8 },
+  montantTTC: { fontSize: 16, fontWeight: '700', color: '#93C5FD', marginBottom: 8 },
   pickerContainer: { marginBottom: 12 },
-  pickerLabel: { fontSize: 14, fontWeight: '600', marginBottom: 6 },
+  pickerLabel: { fontSize: 14, fontWeight: '600', marginBottom: 6, color: '#EAEAEA' },
   statutContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  statutBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6, backgroundColor: '#E5E7EB' },
+  statutBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6, backgroundColor: '#2A2E35' },
   statutBtnActive: { backgroundColor: '#1D4ED8' },
-  statutBtnText: { fontSize: 12, fontWeight: '600', color: '#666' },
+  statutBtnText: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
   statutBtnTextActive: { color: '#fff' },
-  transcriptionBox: { backgroundColor: '#EFF6FF', padding: 12, borderRadius: 8, marginBottom: 12, borderLeftWidth: 3, borderLeftColor: '#1D4ED8' },
-  transcriptionLabel: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
-  transcriptionText: { fontSize: 14, color: '#374151' },
+  transcriptionBox: { backgroundColor: '#1A1D22', padding: 12, borderRadius: 8, marginBottom: 12, borderLeftWidth: 3, borderLeftColor: '#1D4ED8' },
+  transcriptionLabel: { fontSize: 12, fontWeight: '700', marginBottom: 4, color: '#EAEAEA' },
+  transcriptionText: { fontSize: 14, color: '#D1D5DB' },
   voiceRow: { marginBottom: 12 },
   voiceBtn: { backgroundColor: '#1D4ED8', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   voiceBtnStop: { backgroundColor: '#DC2626' },
   voiceBtnText: { color: '#fff', fontWeight: '700' },
   transcribingContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  transcribingText: { marginLeft: 8, color: '#666' },
+  transcribingText: { marginLeft: 8, color: '#9CA3AF' },
   formActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   saveBtn: { flex: 1, backgroundColor: '#10B981', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   saveBtnText: { color: '#fff', fontWeight: '700' },
-  cancelBtn: { flex: 1, backgroundColor: '#EF4444', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  cancelBtn: { flex: 1, backgroundColor: '#DC2626', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   cancelBtnText: { color: '#fff', fontWeight: '700' },
-  itemCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#eee', borderRadius: 12, padding: 16, marginBottom: 12 },
-  itemNumero: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  itemCard: { backgroundColor: '#1A1D22', borderWidth: 1, borderColor: '#2A2E35', borderRadius: 12, padding: 16, marginBottom: 12 },
+  itemNumero: { fontSize: 16, fontWeight: '700', marginBottom: 4, color: '#EAEAEA' },
   itemMontant: { fontSize: 18, fontWeight: '800', color: '#10B981', marginBottom: 4 },
-  itemStatut: { fontSize: 14, color: '#666', marginBottom: 4 },
-  itemTranscription: { fontSize: 13, color: '#374151', marginTop: 4 },
-  empty: { textAlign: 'center', color: '#999', marginTop: 20 },
+  itemStatut: { fontSize: 14, color: '#9CA3AF', marginBottom: 4 },
+  itemTranscription: { fontSize: 13, color: '#D1D5DB', marginTop: 4 },
+  empty: { textAlign: 'center', color: '#6B7280', marginTop: 20 },
+  whisperWarning: { fontSize: 12, color: '#FBBF24', marginBottom: 8, fontStyle: 'italic' },
 });
 

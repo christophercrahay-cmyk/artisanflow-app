@@ -1,9 +1,25 @@
 node_modules/
 .expo/
+.eas/
 backup/
 .DS_Store
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .env
-.env.*
+.env.local
+.env.*.local
+*.keystore
+*.jks
+*.pem
+*.p12
+*.key
+*.crt
+*.aab
+*.apk
+
+# Configuration files with secrets
+config/openai.js
+config/supabase.js
+config/sentry.js

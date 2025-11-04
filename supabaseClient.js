@@ -1,7 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SUPABASE_CONFIG } from './config/supabase';
 
-const SUPABASE_URL = 'https://upihalivqstavxijlwaj.supabase.co';
-const SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVwaWhhbGl2cXN0YXZ4aWpsd2FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE3NjIxMzksImV4cCI6MjA3NzMzODEzOX0.LiTut-3fm7XPAALAi6KQkS1hcwXUctUTPwER9V7cAzs';
+// Validation des clés au démarrage
+if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) {
+  throw new Error(
+    '❌ Configuration Supabase manquante !\n\n' +
+    'Créez le fichier config/supabase.js depuis config/supabase.example.js\n' +
+    'et ajoutez vos clés Supabase.'
+  );
+}
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+  auth: {
+    storage: AsyncStorage,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});

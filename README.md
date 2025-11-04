@@ -105,7 +105,10 @@ artisanflow/
 ├── README.md                 # Documentation principale
 ├── app.json                  # Config Expo
 ├── eas.json                  # Config EAS Build
-└── package.json              # Dépendances
+├── package.json              # Dépendances
+├── kill-port-8081.ps1        # Script libération port 8081
+├── start-dev.ps1             # Démarrage Expo sécurisé
+└── install-artisanflow.ps1   # Installation APK Android
 ```
 
 ## 🐛 Troubleshooting
@@ -123,7 +126,22 @@ Normal en Expo Go. Les transcriptions ne fonctionnent que dans un build natif.
 
 ### Port 8081 occupé
 
-Expo proposera automatiquement le port 8082.
+**Solution rapide :**
+```bash
+npm run kill:port
+npm start
+```
+
+**Alternative :** Utiliser le script automatique :
+```bash
+npm run start:safe
+```
+
+**Scripts PowerShell disponibles :**
+- `kill-port-8081.ps1` : Libère le port 8081
+- `start-dev.ps1` : Libère le port 8081 puis démarre Expo
+
+Si ces solutions ne fonctionnent pas, Expo proposera automatiquement le port 8082.
 
 ## 📄 Licence
 

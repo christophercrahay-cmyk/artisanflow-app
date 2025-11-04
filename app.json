@@ -1,16 +1,11 @@
 {
   "expo": {
-    "entryPoint": "./index.js",
-    "platforms": [
-      "ios",
-      "android"
-    ],
-    "name": "artisanflow",
-    "slug": "artisanflow",
+    "name": "ArtisanFlow",
+    "slug": "artisanflow-3rgvrambzo0tk8d1ddx2",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "plugins": [
       [
@@ -23,18 +18,21 @@
             "ndkVersion": "24.0.8215888"
           }
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0F1115"
     },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "L'application enregistre des notes vocales de chantier.",
-        "NSCameraUsageDescription": "L'application prend des photos pour documenter vos chantiers."
+        "NSCameraUsageDescription": "L'application prend des photos pour documenter vos chantiers.",
+        "NSLocationWhenInUseUsageDescription": "L'application utilise votre position pour afficher la météo et géolocaliser vos photos de chantier.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "L'application utilise votre position pour afficher la météo et géolocaliser vos photos de chantier."
       }
     },
     "android": {
@@ -45,12 +43,22 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "RECORD_AUDIO",
-        "CAMERA"
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ],
-      "package": "com.artisanflow"
+      "package": "com.artisanflow",
+      "scheme": "artisanflow",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ef12de05-654e-4cc5-be14-26fc25571879"
+      }
+    },
+    "owner": "chriskreepz"
   }
 }
