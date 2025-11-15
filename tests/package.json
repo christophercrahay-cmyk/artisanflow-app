@@ -1,0 +1,18 @@
+{
+  "name": "artisanflow-rls-tests",
+  "version": "1.0.0",
+  "description": "Tests QA pour vérifier la Row Level Security (RLS)",
+  "type": "module",
+  "scripts": {
+    "test:rls": "node test_rls_security.js",
+    "test:rls:tsx": "tsx test_rls_security.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
+  }
+}
+

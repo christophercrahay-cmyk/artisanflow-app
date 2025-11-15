@@ -10,8 +10,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Audio } from 'expo-av';
+import * as Sharing from 'expo-sharing';
 import { supabase } from './supabaseClient';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useAppStore } from './store/useAppStore';
 
 // Whisper.rn est un module natif - pas disponible dans Expo Go
@@ -44,6 +45,10 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   
+  // États pour les paramètres entreprise
+  const [companySettings, setCompanySettings] = useState(null);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  
   // États pour le formulaire
   const [numero, setNumero] = useState('');
   const [montant, setMontant] = useState('');
@@ -53,16 +58,25 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
   const [statut, setStatut] = useState(isDevis ? 'brouillon' : 'brouillon');
   const [dateValidite, setDateValidite] = useState('');
   
+  // États pour les informations entreprise (pré-remplies depuis settings)
+  const [companyName, setCompanyName] = useState('');
+  const [companySiret, setCompanySiret] = useState('');
+  const [companyAddress, setCompanyAddress] = useState('');
+  const [companyCity, setCompanyCity] = useState('');
+  const [companyPhone, setCompanyPhone] = useState('');
+  const [companyEmail, setCompanyEmail] = useState('');
+  
   const whisperContextRef = useRef(null);
   const soundRef = useRef(null);
 
   useEffect(() => {
     loadItems();
+    loadCompanySettings();
   }, [projectId]);
 
   useEffect(() => {
     return () => {
-      if (soundRef.current) soundRef.current.unloadAsync();
+      if (soundRef.current) {soundRef.current.unloadAsync();}
       if (whisperContextRef.current) {
         whisperContextRef.current.release().catch((err) => 
           console.warn('[DevisFactures] Erreur release Whisper:', err)
@@ -70,6 +84,23 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
       }
     };
   }, []);
+
+  // Mettre à jour la TVA et les infos entreprise quand les settings sont chargés
+  useEffect(() => {
+    if (companySettings && !editingId) {
+      // TVA
+      if (companySettings.tva_default) {
+        setTva(companySettings.tva_default.toString());
+      }
+      // Infos entreprise
+      setCompanyName(companySettings.company_name || '');
+      setCompanySiret(companySettings.company_siret || '');
+      setCompanyAddress(companySettings.company_address || '');
+      setCompanyCity(companySettings.company_city || '');
+      setCompanyPhone(companySettings.company_phone || '');
+      setCompanyEmail(companySettings.company_email || '');
+    }
+  }, [companySettings, editingId]);
 
   const loadItems = async () => {
     try {
@@ -92,8 +123,51 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
     }
   };
 
+  const loadCompanySettings = async () => {
+    try {
+      setLoadingSettings(true);
+      
+      // Récupérer l'utilisateur connecté pour filtrer par user_id (RLS)
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.warn('[DevisFactures] Utilisateur non connecté');
+        setLoadingSettings(false);
+        return;
+      }
+      
+      const { data, error } = await supabase
+        .from('brand_settings')
+        .select('*')
+        .eq('user_id', user.id)
+        .limit(1)
+        .maybeSingle();
+      
+      if (error && error.code !== 'PGRST116') {
+        console.error('[DevisFactures] Erreur chargement settings:', error);
+      }
+      
+      if (data) {
+        setCompanySettings(data);
+        console.log('[DevisFactures] ✅ Paramètres entreprise chargés:', {
+          tva: data.tva_default,
+          prefixDevis: data.devis_prefix,
+          prefixFacture: data.facture_prefix,
+        });
+      } else {
+        console.log('[DevisFactures] ℹ️ Aucun paramètre entreprise configuré, utilisation des valeurs par défaut');
+      }
+    } catch (err) {
+      console.error('[DevisFactures] Exception load settings:', err);
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
   const generateNumero = () => {
-    const prefix = isDevis ? 'DE' : 'FA';
+    // Utiliser les préfixes depuis les settings, sinon fallback
+    const prefix = isDevis 
+      ? (companySettings?.devis_prefix || 'DEV')
+      : (companySettings?.facture_prefix || 'FA');
     const year = new Date().getFullYear();
     const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
     return `${prefix}-${year}-${random}`;
@@ -104,11 +178,19 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
     setEditingId(null);
     setNumero('');
     setMontant('');
-    setTva('20');
+    // Utiliser la TVA par défaut depuis les settings, sinon fallback à 20
+    setTva(companySettings?.tva_default?.toString() || '20');
     setNotes('');
     setTranscription('');
     setDateValidite('');
     setStatut(isDevis ? 'brouillon' : 'brouillon');
+    // Réinitialiser les infos entreprise depuis les settings
+    setCompanyName(companySettings?.company_name || '');
+    setCompanySiret(companySettings?.company_siret || '');
+    setCompanyAddress(companySettings?.company_address || '');
+    setCompanyCity(companySettings?.company_city || '');
+    setCompanyPhone(companySettings?.company_phone || '');
+    setCompanyEmail(companySettings?.company_email || '');
   };
 
   const calculateMontantTTC = () => {
@@ -141,7 +223,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
       
       // Récupérer l'utilisateur connecté pour RLS
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Utilisateur non authentifié');
+      if (!user) {throw new Error('Utilisateur non authentifié');}
       
       const tvaPercent = parseFloat(tva) || 0;
       const montantTTC = montantHT * (1 + tvaPercent / 100);
@@ -158,6 +240,13 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
         statut: statut,
         notes: notes.trim() || null,
         transcription: transcription.trim() || null,
+        // Informations entreprise (pré-remplies depuis settings, modifiables par document)
+        company_name: companyName.trim() || null,
+        company_siret: companySiret.trim() || null,
+        company_address: companyAddress.trim() || null,
+        company_city: companyCity.trim() || null,
+        company_phone: companyPhone.trim() || null,
+        company_email: companyEmail.trim() || null,
       };
 
       if (isDevis && dateValidite) {
@@ -178,7 +267,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
         error = insertError;
       }
 
-      if (error) throw error;
+      if (error) {throw error;}
 
       Alert.alert('OK', editingId ? `${isDevis ? 'Devis' : 'Facture'} modifié ✅` : `${isDevis ? 'Devis' : 'Facture'} créé ✅`);
       resetForm();
@@ -219,7 +308,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
 
   const stopRecording = async () => {
     try {
-      if (!recording) return;
+      if (!recording) {return;}
 
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
@@ -338,26 +427,76 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
     setTranscription(item.transcription || '');
     setStatut(item.statut);
     setDateValidite(isDevis ? item.date_validite || '' : item.date_echeance || '');
+    // Charger les infos entreprise du document (si elles existent)
+    setCompanyName(item.company_name || companySettings?.company_name || '');
+    setCompanySiret(item.company_siret || companySettings?.company_siret || '');
+    setCompanyAddress(item.company_address || companySettings?.company_address || '');
+    setCompanyCity(item.company_city || companySettings?.company_city || '');
+    setCompanyPhone(item.company_phone || companySettings?.company_phone || '');
+    setCompanyEmail(item.company_email || companySettings?.company_email || '');
     setShowForm(true);
   };
 
+  const handleViewPDF = async (item) => {
+    try {
+      // Vérifier s'il y a des lignes pour ce devis
+      const { data: lignes, error: lignesError } = await supabase
+        .from('devis_lignes')
+        .select('id')
+        .eq('devis_id', item.id);
+
+      if (lignesError || !lignes || lignes.length === 0) {
+        Alert.alert('Aucune ligne', 'Ce devis ne contient pas de lignes détaillées.\n\nUtilisez le bouton "Générer devis IA" pour créer un devis structuré.');
+        return;
+      }
+
+      // Générer le PDF depuis la BDD
+      const { generateDevisPDFFromDB } = require('./utils/utils/pdf');
+      const result = await generateDevisPDFFromDB(item.id);
+
+      if (result.localUri) {
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(result.localUri, {
+            mimeType: 'application/pdf',
+            dialogTitle: `Devis ${item.numero}`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Erreur génération PDF:', error);
+      Alert.alert('Erreur', error.message || 'Impossible de générer le PDF');
+    }
+  };
+
   const renderItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.itemCard}
-      onPress={() => editItem(item)}
-      onLongPress={() => deleteItem(item.id)}
-    >
-      <Text style={styles.itemNumero}>{item.numero}</Text>
-      <Text style={styles.itemMontant}>{item.montant_ttc.toFixed(2)} € TTC</Text>
-      <Text style={styles.itemStatut}>
-        Statut: {item.statut.charAt(0).toUpperCase() + item.statut.slice(1)}
-      </Text>
-      {item.transcription && (
-        <Text style={styles.itemTranscription} numberOfLines={2}>
-          💬 {item.transcription}
+    <View style={styles.itemCard}>
+      <TouchableOpacity
+        style={styles.itemContent}
+        onPress={() => editItem(item)}
+        onLongPress={() => deleteItem(item.id)}
+      >
+        <Text style={styles.itemNumero}>{item.numero}</Text>
+        <Text style={styles.itemMontant}>{item.montant_ttc.toFixed(2)} € TTC</Text>
+        <Text style={styles.itemStatut}>
+          Statut: {item.statut.charAt(0).toUpperCase() + item.statut.slice(1)}
         </Text>
+        {item.transcription && (
+          <Text style={styles.itemTranscription} numberOfLines={2}>
+            💬 {item.transcription}
+          </Text>
+        )}
+      </TouchableOpacity>
+      
+      {isDevis && (
+        <TouchableOpacity
+          style={styles.pdfButton}
+          onPress={() => handleViewPDF(item)}
+        >
+          <Text style={styles.pdfButtonText}>👁️ PDF</Text>
+        </TouchableOpacity>
       )}
-    </TouchableOpacity>
+    </View>
   );
 
   const statutOptions = isDevis
@@ -368,7 +507,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>
-          {isDevis ? '📋 Devis' : '🧾 Factures'}
+          {isDevis ? '📋 Devis' : '💰 Factures'}
         </Text>
         <TouchableOpacity
           style={styles.addBtn}
@@ -393,6 +532,67 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
             onChangeText={setNumero}
             editable={!editingId}
           />
+          
+          {/* Section Informations Entreprise */}
+          <Text style={styles.sectionLabel}>📋 Informations Entreprise</Text>
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Nom de l'entreprise *"
+            placeholderTextColor="#9CA3AF"
+            value={companyName}
+            onChangeText={setCompanyName}
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="SIRET"
+            placeholderTextColor="#9CA3AF"
+            value={companySiret}
+            onChangeText={setCompanySiret}
+            keyboardType="numeric"
+          />
+          
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Adresse"
+            placeholderTextColor="#9CA3AF"
+            value={companyAddress}
+            onChangeText={setCompanyAddress}
+            multiline
+            numberOfLines={2}
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Ville"
+            placeholderTextColor="#9CA3AF"
+            value={companyCity}
+            onChangeText={setCompanyCity}
+          />
+          
+          <View style={styles.row}>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="Téléphone"
+              placeholderTextColor="#9CA3AF"
+              value={companyPhone}
+              onChangeText={setCompanyPhone}
+              keyboardType="phone-pad"
+            />
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="Email"
+              placeholderTextColor="#9CA3AF"
+              value={companyEmail}
+              onChangeText={setCompanyEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+          </View>
+          
+          {/* Section Montants */}
+          <Text style={styles.sectionLabel}>💰 Montants</Text>
           
           <View style={styles.row}>
             <TextInput
@@ -527,6 +727,7 @@ const styles = StyleSheet.create({
   addBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1D4ED8', alignItems: 'center', justifyContent: 'center' },
   addBtnText: { color: '#fff', fontSize: 24, fontWeight: '700' },
   form: { backgroundColor: '#1A1D22', padding: 16, borderRadius: 12, marginBottom: 16 },
+  sectionLabel: { fontSize: 14, fontWeight: '700', color: '#60A5FA', marginTop: 8, marginBottom: 12 },
   input: { height: 48, borderWidth: 1, borderColor: '#374151', borderRadius: 8, paddingHorizontal: 12, marginBottom: 12, backgroundColor: '#0F1115', color: '#EAEAEA' },
   row: { flexDirection: 'row', gap: 8 },
   textArea: { height: 100, textAlignVertical: 'top' },
@@ -552,11 +753,36 @@ const styles = StyleSheet.create({
   saveBtnText: { color: '#fff', fontWeight: '700' },
   cancelBtn: { flex: 1, backgroundColor: '#DC2626', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   cancelBtnText: { color: '#fff', fontWeight: '700' },
-  itemCard: { backgroundColor: '#1A1D22', borderWidth: 1, borderColor: '#2A2E35', borderRadius: 12, padding: 16, marginBottom: 12 },
+  itemCard: { 
+    backgroundColor: '#1A1D22', 
+    borderWidth: 1, 
+    borderColor: '#2A2E35', 
+    borderRadius: 12, 
+    padding: 16, 
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  itemContent: {
+    flex: 1,
+  },
   itemNumero: { fontSize: 16, fontWeight: '700', marginBottom: 4, color: '#EAEAEA' },
   itemMontant: { fontSize: 18, fontWeight: '800', color: '#10B981', marginBottom: 4 },
   itemStatut: { fontSize: 14, color: '#9CA3AF', marginBottom: 4 },
   itemTranscription: { fontSize: 13, color: '#D1D5DB', marginTop: 4 },
+  pdfButton: {
+    backgroundColor: '#8B5CF6',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginLeft: 12,
+  },
+  pdfButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
   empty: { textAlign: 'center', color: '#6B7280', marginTop: 20 },
   whisperWarning: { fontSize: 12, color: '#FBBF24', marginBottom: 8, fontStyle: 'italic' },
 });

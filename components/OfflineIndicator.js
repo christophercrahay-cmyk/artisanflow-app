@@ -33,7 +33,7 @@ export default function OfflineIndicator() {
     }
   }, [isOnline]);
 
-  if (isOnline) return null;
+  if (isOnline) {return null;}
 
   const styles = getStyles(theme);
 

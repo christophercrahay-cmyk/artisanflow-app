@@ -1,0 +1,45 @@
+=======================================================
+QA TEST RUNNER - MODE D'EMPLOI RAPIDE
+=======================================================
+
+ACCÈS
+-------------------------------------------------------
+1. Lancer l'app en mode dev : npx expo start
+2. Aller dans l'onglet "Documents"
+3. Taper 10 fois RAPIDEMENT sur le titre "Documents"
+4. L'écran QA s'ouvre automatiquement
+
+UTILISATION
+-------------------------------------------------------
+▶️ Run Full Flow : Lance les 7 tests E2E
+🗑️ Purge Last Run : Supprime les données créées
+📄 Export Report : Exporte le rapport JSON
+
+SCÉNARIO TESTÉ
+-------------------------------------------------------
+1. Créer client de test
+2. Créer chantier de test
+3. Ajouter note vocale mock
+4. Générer devis via IA
+5. Générer PDF
+6. Créer facture
+7. Upload photo mock
+
+DURÉE
+-------------------------------------------------------
+Environ 5-10 secondes
+
+DOCUMENTATION
+-------------------------------------------------------
+- README_QA.md : Guide complet
+- CHANGELOG_QA.md : Technique
+- FINAL_QA_SUMMARY.md : Résumé
+
+IMPORTANT
+-------------------------------------------------------
+Le runner n'existe QU'EN MODE DEV
+Invisible en production
+Ne touche PAS aux vraies données
+
+=======================================================
+

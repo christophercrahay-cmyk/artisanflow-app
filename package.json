@@ -1,6 +1,6 @@
 {
   "name": "artisanflow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.js",
   "scripts": {
     "start": "expo start --dev-client --clear",
@@ -27,8 +27,9 @@
     "@react-navigation/native": "^7.1.19",
     "@react-navigation/native-stack": "^7.6.1",
     "@sentry/react-native": "~7.2.0",
-    "@supabase/supabase-js": "^2.77.0",
+    "@supabase/supabase-js": "^2.79.0",
     "@types/react": "~19.1.10",
+    "dotenv": "^17.2.3",
     "expo": "54.0.22",
     "expo-asset": "~12.0.9",
     "expo-audio": "~1.0.14",
@@ -64,6 +65,13 @@
     "zustand": "^5.0.8"
   },
   "private": true,
+  "expo": {
+    "install": {
+      "exclude": [
+        "@react-native-picker/picker"
+      ]
+    }
+  },
   "devDependencies": {
     "@testing-library/jest-native": "^5.4.3",
     "@testing-library/react-native": "^13.3.3",

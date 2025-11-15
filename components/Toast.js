@@ -1,15 +1,32 @@
 import { ToastAndroid, Platform, Alert } from 'react-native';
+import { playSuccessSound, playErrorSound, playClickSound } from '../utils/soundService';
 
 /**
  * Affiche un toast (notification courte non-intrusive)
  * @param {string} message - Le message à afficher
  * @param {'success'|'error'|'info'|'warning'} type - Type de toast
  * @param {'short'|'long'} duration - Durée d'affichage
+ * @param {boolean} playSound - Jouer un son (défaut: true)
  */
-export const showToast = (message, type = 'success', duration = 'short') => {
+export const showToast = (message, type = 'success', duration = 'short', playSoundEnabled = true) => {
   const durationValue = duration === 'long' 
     ? ToastAndroid.LONG 
     : ToastAndroid.SHORT;
+
+  // Jouer le son correspondant
+  if (playSoundEnabled) {
+    switch (type) {
+      case 'success':
+        playSuccessSound();
+        break;
+      case 'error':
+        playErrorSound();
+        break;
+      default:
+        playClickSound();
+        break;
+    }
+  }
 
   if (Platform.OS === 'android') {
     ToastAndroid.show(message, durationValue);
@@ -23,15 +40,15 @@ export const showToast = (message, type = 'success', duration = 'short') => {
 /**
  * Toast de succès (vert)
  */
-export const showSuccess = (message, duration = 'short') => {
-  showToast(`✅ ${message}`, 'success', duration);
+export const showSuccess = (message, duration = 'short', playSoundEnabled = true) => {
+  showToast(`✅ ${message}`, 'success', duration, playSoundEnabled);
 };
 
 /**
  * Toast d'erreur (rouge)
  */
-export const showError = (message, duration = 'short') => {
-  showToast(`❌ ${message}`, 'error', duration);
+export const showError = (message, duration = 'short', playSoundEnabled = true) => {
+  showToast(`❌ ${message}`, 'error', duration, playSoundEnabled);
 };
 
 /**

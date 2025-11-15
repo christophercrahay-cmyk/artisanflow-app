@@ -53,8 +53,18 @@ async function attachPhoto(
   projectName?: string
 ) {
   try {
+    // Récupérer l'URI depuis capture.data ou capture directement
+    const fileUri = (capture as any).data?.fileUri || (capture as any).fileUri;
+    
+    if (!fileUri) {
+      logger.error('AttachPhoto', 'URI manquant', { capture });
+      throw new Error('URI de la photo manquant');
+    }
+    
+    logger.info('AttachPhoto', 'Compression image', { fileUri });
+    
     // Compresser l'image si nécessaire
-    const compressed = await compressImage(capture.fileUri);
+    const compressed = await compressImage(fileUri);
     
     // Convertir en bytes
     const resp = await fetch(compressed.uri);
@@ -76,11 +86,13 @@ async function attachPhoto(
     const { data: urlData } = supabase.storage.from('project-photos').getPublicUrl(fileName);
     const publicUrl = urlData.publicUrl;
 
-    // Capturer taken_at et géolocalisation
+    // Capturer taken_at et géolocalisation (GPS optionnel)
     const takenAt = new Date().toISOString();
     let latitude: number | null = null;
     let longitude: number | null = null;
 
+    // La géolocalisation est OPTIONNELLE (module natif requis)
+    // L'app fonctionne sans GPS, les photos sont juste sans coordonnées
     try {
       const locationModule = await import('expo-location');
       const Location = locationModule.default || locationModule;
@@ -90,14 +102,15 @@ async function attachPhoto(
         if (status === 'granted') {
           const location = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
+            timeout: 5000, // Timeout 5s pour ne pas bloquer
           });
           latitude = location.coords.latitude;
           longitude = location.coords.longitude;
         }
       }
     } catch (locationErr) {
-      // Ignorer les erreurs de géolocalisation
-      console.warn('[AttachPhoto] Géolocalisation non disponible:', locationErr);
+      // Silencieux : géolocalisation optionnelle
+      console.log('[AttachPhoto] GPS non disponible (normal en dev/web), photo enregistrée sans coordonnées');
     }
 
     // Insérer dans la base de données
@@ -137,8 +150,16 @@ async function attachAudio(
   projectName?: string
 ) {
   try {
+    // Récupérer l'URI depuis capture.data ou capture directement
+    const fileUri = (capture as any).data?.fileUri || (capture as any).fileUri;
+    
+    if (!fileUri) {
+      logger.error('AttachAudio', 'URI manquant', { capture });
+      throw new Error('URI de l\'audio manquant');
+    }
+    
     // Convertir le fichier audio en bytes
-    const resp = await fetch(capture.fileUri);
+    const resp = await fetch(fileUri);
     const arrayBuffer = await resp.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
 
@@ -153,6 +174,10 @@ async function attachAudio(
       throw uploadErr;
     }
 
+    // Récupérer duration_ms depuis capture.data ou capture directement
+    const durationMs = (capture as any).data?.durationMs || (capture as any).durationMs || null;
+    logger.info('AttachAudio', 'Duration récupérée', { durationMs });
+
     // Insérer dans la base de données
     const noteData = {
       project_id: projectId,
@@ -160,7 +185,7 @@ async function attachAudio(
       user_id: userId,
       type: 'voice',
       storage_path: fileName,
-      duration_ms: capture.durationMs,
+      duration_ms: durationMs,
     };
 
     const { error: insertErr } = await supabase.from('notes').insert([noteData]);
@@ -186,13 +211,21 @@ async function attachNote(
   projectName?: string
 ) {
   try {
+    // Récupérer le contenu depuis capture.data ou capture directement
+    const content = (capture as any).data?.content || (capture as any).content;
+    
+    if (!content) {
+      logger.error('AttachNote', 'Contenu manquant', { capture });
+      throw new Error('Contenu de la note manquant');
+    }
+    
     // Insérer directement dans la base de données
     const noteData = {
       project_id: projectId,
       client_id: clientId,
       user_id: userId,
       type: 'text',
-      transcription: capture.content,
+      transcription: content,
     };
 
     const { error: insertErr } = await supabase.from('notes').insert([noteData]);

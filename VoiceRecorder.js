@@ -2,13 +2,22 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
-import { View, Text, TouchableOpacity, FlatList, Alert, StyleSheet, ActivityIndicator, TextInput, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, Alert, StyleSheet, ActivityIndicator, TextInput, ScrollView, Animated, Pressable } from 'react-native';
 
-import { Audio } from 'expo-av';
+import { useIsFocused } from '@react-navigation/native';
+
+import { Audio } from 'expo-av'; // ✅ Import manquant pour Audio.Recording, Audio.Sound, etc.
+
+import { 
+  useAudioRecorder, 
+  AudioModule, 
+  RecordingPresets,
+  useAudioPlayer
+} from 'expo-audio';
 
 import { supabase } from './supabaseClient';
 
-import { transcribeAudio } from './services/transcriptionService';
+import { transcribeAudio, correctNoteText } from './services/transcriptionService';
 
 import { analyzeNote } from './services/quoteAnalysisService';
 
@@ -22,9 +31,14 @@ import { handleAPIError } from './utils/errorHandler';
 
 import logger from './utils/logger';
 import { showSuccess, showError } from './components/Toast';
+import { requireProOrPaywall } from './utils/proAccess';
+import { useNavigation } from '@react-navigation/native';
+import { TranscriptionFeedback } from './components/TranscriptionFeedback';
 
 export default function VoiceRecorder({ projectId }) {
+  const navigation = useNavigation();
 
+  const isFocused = useIsFocused();
   const [recording, setRecording] = useState(null);
 
   const [recordUri, setRecordUri] = useState(null);
@@ -50,23 +64,34 @@ export default function VoiceRecorder({ projectId }) {
   const [transcriptionStatus, setTranscriptionStatus] = useState('');
   const [transcriptionProgress, setTranscriptionProgress] = useState(0);
   const [analysisResult, setAnalysisResult] = useState(null);
+  
+  // État du bouton "Envoyer" : 'empty' | 'ready' | 'success'
+  const [sendButtonState, setSendButtonState] = useState('empty');
 
   const loadNotes = async () => {
     try {
+      // ✅ Récupérer l'utilisateur connecté pour isolation multi-tenant
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Erreur', 'Utilisateur non authentifié');
+        return;
+      }
+
       const { data, error, status } = await supabase
         .from('notes')
         .select('*')
         .eq('project_id', projectId)
+        .eq('user_id', user.id) // ✅ Filtre obligatoire pour isolation utilisateurs
         .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('Erreur chargement notes:', status, error.message);
+        logger.error('VoiceRecorder', 'Erreur chargement notes', { status, error });
         Alert.alert('Erreur', 'Impossible de charger les notes');
         return;
       }
       setItems(data || []);
     } catch (err) {
-      console.error('Exception chargement notes:', err);
+      logger.error('VoiceRecorder', 'Exception chargement notes', err);
       Alert.alert('Erreur', 'Erreur lors du chargement des notes');
     }
   };
@@ -80,31 +105,38 @@ export default function VoiceRecorder({ projectId }) {
     };
   }, [projectId]);
 
+  // Rafraîchir quand l'écran parent devient visible
+  useEffect(() => {
+    if (isFocused && projectId) {
+      loadNotes();
+    }
+  }, [isFocused, projectId]);
+
   const startRecording = async () => {
     try {
-      console.log('[VoiceRecorder] Demande de permission micro...');
+      logger.info('VoiceRecorder', 'Demande de permission micro...');
       const { status: audioStatus } = await Audio.requestPermissionsAsync();
-      console.log('[VoiceRecorder] Permission audio status:', audioStatus);
+      logger.info('VoiceRecorder', `Permission audio status: ${audioStatus}`);
       
       if (audioStatus !== 'granted') {
         Alert.alert('Micro refusé', 'Active le micro dans les réglages.');
         return;
       }
 
-      console.log('[VoiceRecorder] Configuration du mode audio...');
+      logger.info('VoiceRecorder', 'Configuration du mode audio...');
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
 
-      console.log('[VoiceRecorder] Création de l\'enregistrement...');
+      logger.info('VoiceRecorder', 'Création de l\'enregistrement...');
       const recording = new Audio.Recording();
 
       await recording.prepareToRecordAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
 
-      console.log('[VoiceRecorder] Démarrage de l\'enregistrement...');
+      logger.info('VoiceRecorder', 'Démarrage de l\'enregistrement...');
       await recording.startAsync();
       setRecording(recording);
 
@@ -126,15 +158,15 @@ export default function VoiceRecorder({ projectId }) {
   const stopRecording = async () => {
     try {
       if (!recording) {
-        console.warn('[VoiceRecorder] Aucun enregistrement en cours');
+        logger.warn('VoiceRecorder', 'Aucun enregistrement en cours');
         return;
       }
 
-      console.log('[VoiceRecorder] Arrêt de l\'enregistrement...');
+      logger.info('VoiceRecorder', 'Arrêt de l\'enregistrement...');
       
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
-      console.log('[VoiceRecorder] URI obtenue:', uri);
+      logger.info('VoiceRecorder', `URI obtenue: ${uri}`);
 
       const status = await recording.getStatusAsync();
       const duration = status?.durationMillis || 0;
@@ -156,10 +188,11 @@ export default function VoiceRecorder({ projectId }) {
         return;
       }
 
-      console.log(`[VoiceRecorder] Durée enregistrement: ${durationSeconds}s (${duration}ms)`);
+      logger.info('VoiceRecorder', `Durée enregistrement: ${durationSeconds}s (${duration}ms)`);
 
       setRecording(null);
       setRecordUri(uri);
+      setSendButtonState('ready'); // ✅ Note prête à envoyer : bouton bleu
 
       logger.success('VoiceRecorder', `Enregistrement arrêté - Durée: ${durationSeconds}s`);
     } catch (e) {
@@ -169,7 +202,7 @@ export default function VoiceRecorder({ projectId }) {
   };
 
   const uploadAndSave = async () => {
-    if (!recordUri) return Alert.alert('Aucun enregistrement', 'Enregistre d\'abord.');
+    if (!recordUri) {return Alert.alert('Aucun enregistrement', 'Enregistre d\'abord.');}
 
     // Vérifier les sélections dans le store
     const { currentClient, currentProject } = useAppStore.getState();
@@ -181,7 +214,7 @@ export default function VoiceRecorder({ projectId }) {
     try {
       setUploading(true);
 
-      console.log('[VoiceRecorder] Upload du fichier:', recordUri);
+      logger.info('VoiceRecorder', `Upload du fichier: ${recordUri}`);
 
       const resp = await fetch(recordUri);
       const arrayBuffer = await resp.arrayBuffer();
@@ -192,39 +225,60 @@ export default function VoiceRecorder({ projectId }) {
         .storage
         .from('voices')
         .upload(fileName, bytes, { contentType: 'audio/m4a', upsert: false });
-      if (upErr) throw upErr;
+      if (upErr) {throw upErr;}
 
       logger.success('VoiceRecorder', `Upload réussi - Fichier: ${fileName}`, { projectId, clientId: currentClient.id });
 
-      // ÉTAPE 1 : Transcription avec OpenAI Whisper
+      // ÉTAPE 1 : Upload fichier audio
       setIsTranscribing(true);
-      setTranscriptionStatus('🎤 Transcription en cours...');
-      setTranscriptionProgress(30);
+      setTranscriptionStatus('Upload du fichier audio vers le cloud...');
+      setTranscriptionProgress(10);
 
       let transcribedText = '';
       let analysis = null;
 
       try {
-        transcribedText = await transcribeAudio(recordUri);
-        console.log('[VoiceRecorder] Transcription:', transcribedText);
+        // Vérifier l'accès Pro pour la transcription Whisper
+        const ok = await requireProOrPaywall(navigation, 'Notes vocales automatiques');
+        if (!ok) {
+          setIsTranscribing(false);
+          setTranscriptionStatus('');
+          setTranscriptionProgress(0);
+          return;
+        }
+
+        // ÉTAPE 2 : Transcription Whisper (texte brut)
+        setTranscriptionProgress(33);
+        setTranscriptionStatus('Transcription en cours avec Whisper IA...');
         
-        setTranscriptionProgress(60);
-        setTranscriptionStatus('🧠 Analyse de la note...');
+        const rawText = await transcribeAudio(recordUri);
+        logger.info('VoiceRecorder', `Transcription brute: ${rawText}`);
         
-        // ÉTAPE 2 : Analyse de la note avec GPT
+        // ÉTAPE 3 : Correction orthographique avec GPT
+        setTranscriptionProgress(55);
+        setTranscriptionStatus('Correction orthographique en cours...');
+        
+        transcribedText = await correctNoteText(rawText);
+        logger.info('VoiceRecorder', `Transcription corrigée: ${transcribedText}`);
+        
+        // ÉTAPE 4 : Analyse de la note avec GPT
+        setTranscriptionProgress(80);
+        setTranscriptionStatus('Analyse du contenu par l\'IA...');
+        
         if (transcribedText && transcribedText.trim()) {
           analysis = await analyzeNote(transcribedText);
-          console.log('[VoiceRecorder] Analyse:', analysis);
+          logger.info('VoiceRecorder', `Analyse: ${JSON.stringify(analysis)}`);
           setAnalysisResult(analysis);
         }
         
+        // ÉTAPE 5 : Terminé
         setTranscriptionProgress(100);
-        setTranscriptionStatus('✅ Terminé !');
+        setTranscriptionStatus('Traitement terminé avec succès !');
         
         setTranscription(transcribedText);
         
       } catch (transcribeError) {
-        console.error('[VoiceRecorder] Erreur transcription/analyse:', transcribeError);
+        logger.error('VoiceRecorder', 'Erreur transcription/analyse', transcribeError);
         
         const errorInfo = handleAPIError(transcribeError, 'VoiceRecorder');
         
@@ -273,8 +327,8 @@ export default function VoiceRecorder({ projectId }) {
         const errorMessage = insErr.message || '';
         if (errorMessage.includes('transcription') || errorMessage.includes('analysis_data')) {
           const missingColumns = [];
-          if (errorMessage.includes('transcription')) missingColumns.push('transcription');
-          if (errorMessage.includes('analysis_data')) missingColumns.push('analysis_data');
+          if (errorMessage.includes('transcription')) {missingColumns.push('transcription');}
+          if (errorMessage.includes('analysis_data')) {missingColumns.push('analysis_data');}
           
           throw new Error(
             `Colonnes manquantes dans Supabase: ${missingColumns.join(', ')}. ` +
@@ -288,12 +342,22 @@ export default function VoiceRecorder({ projectId }) {
       
       logger.success('VoiceRecorder', 'Note sauvegardée en base', { noteId: noteData.project_id });
 
+      // ✅ Rafraîchir la liste des notes
+      await loadNotes();
+
       setRecordUri(null);
       setDurationMs(0);
       setTranscription('');
       setAnalysisResult(null);
-
-      await loadNotes();
+      
+      // ✅ État "success" : bouton vert pendant 2s
+      setSendButtonState('success');
+      setTimeout(() => {
+        setSendButtonState('empty'); // Retour à l'état vide après 2s
+      }, 2000);
+      
+      // Toast de succès
+      showSuccess('Note envoyée avec succès');
 
       // ÉTAPE 4 : Générer un devis automatiquement si prestation détectée
       let alertTitle = '✅ Note vocale envoyée.';
@@ -330,7 +394,7 @@ export default function VoiceRecorder({ projectId }) {
             }
           }
         } catch (quoteError) {
-          console.error('[VoiceRecorder] Erreur génération devis:', quoteError);
+          logger.error('VoiceRecorder', 'Erreur génération devis', quoteError);
           // Ne pas bloquer, juste logger l'erreur
         }
       } else if (analysis && analysis.type === 'client_info') {
@@ -376,7 +440,7 @@ export default function VoiceRecorder({ projectId }) {
       if (!path) {
         throw new Error('Aucun chemin de fichier trouvé');
       }
-      let { data: pub } = supabase.storage.from('voices').getPublicUrl(path);
+      const { data: pub } = supabase.storage.from('voices').getPublicUrl(path);
       let url = pub?.publicUrl;
       if (!url) {
         const { data: signed } = await supabase.storage
@@ -398,29 +462,89 @@ export default function VoiceRecorder({ projectId }) {
         }
       });
     } catch (e) {
-      console.error('[VoiceRecorder] Erreur play:', e);
+      logger.error('VoiceRecorder', 'Erreur play', e);
       Alert.alert('Lecture impossible', e?.message || 'Erreur de lecture.');
     }
   };
 
-  const saveEdit = async (id) => {
+  const saveEdit = async (id, textToSave) => {
     try {
+      // Utiliser le texte passé en paramètre (état local) au lieu du state global
       const { error } = await supabase
         .from('notes')
-        .update({ transcription: editText })
+        .update({ transcription: textToSave })
         .eq('id', id);
-      if (error) throw error;
+      if (error) {throw error;}
       setEditingId(null);
       setEditText('');
       await loadNotes();
-      Alert.alert('OK', 'Note modifiée ✅');
+      showSuccess('Note modifiée ✅');
     } catch (e) {
-      Alert.alert('Erreur', e.message || 'Modification impossible');
+      showError(e.message || 'Modification impossible');
     }
   };
 
-  const Item = ({ item }) => {
+  // Fonction de suppression d'une note
+  const deleteNote = async (noteId, storagePath) => {
+    Alert.alert(
+      'Supprimer cette note ?',
+      'Cette note sera définitivement supprimée du chantier.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Supprimer le fichier audio dans Supabase Storage si présent
+              if (storagePath) {
+                try {
+                  const { error: storageError } = await supabase.storage
+                    .from('voices')
+                    .remove([storagePath]);
+                  if (storageError) {
+                    logger.warn('VoiceRecorder', 'Erreur suppression storage', storageError);
+                    // Continuer même si la suppression du fichier échoue
+                  }
+                } catch (storageErr) {
+                  logger.warn('VoiceRecorder', 'Exception suppression storage', storageErr);
+                  // Continuer même si la suppression du fichier échoue
+                }
+              }
+
+              // Supprimer la note dans la base de données
+              const { error } = await supabase
+                .from('notes')
+                .delete()
+                .eq('id', noteId);
+
+              if (error) {
+                logger.error('VoiceRecorder', 'Erreur suppression note', error);
+                throw error;
+              }
+
+              logger.success('VoiceRecorder', 'Note supprimée');
+              showSuccess('Note supprimée');
+              
+              // Rafraîchir la liste des notes
+              await loadNotes();
+            } catch (err) {
+              logger.error('VoiceRecorder', 'Exception suppression note', err);
+              showError(err.message || 'Impossible de supprimer la note');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const Item = ({ item, index }) => {
     const isEditing = editingId === item.id;
+    
+    // État local pour éviter les re-renders à chaque frappe
+    // Le TextInput utilise cet état local, pas le state global
+    const [localEditText, setLocalEditText] = useState(item.transcription);
+    
     let itemAnalysis = null;
     try {
       if (item.analysis_data) {
@@ -430,17 +554,77 @@ export default function VoiceRecorder({ projectId }) {
       // Ignorer les erreurs de parsing
     }
     
+    // Animation d'apparition pour chaque note
+    const opacityAnim = useRef(new Animated.Value(0)).current;
+    const translateYAnim = useRef(new Animated.Value(20)).current;
+    const scaleAnim = useRef(new Animated.Value(1)).current;
+
+    useEffect(() => {
+      // Stagger : chaque note apparaît avec un délai basé sur son index
+      Animated.parallel([
+        Animated.timing(opacityAnim, {
+          toValue: 1,
+          duration: 300,
+          delay: index * 50,
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateYAnim, {
+          toValue: 0,
+          tension: 50,
+          friction: 7,
+          delay: index * 50,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, [index]);
+
+    const handlePressIn = (buttonScale) => {
+      Animated.spring(buttonScale, {
+        toValue: 0.95,
+        tension: 300,
+        friction: 10,
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const handlePressOut = (buttonScale) => {
+      Animated.spring(buttonScale, {
+        toValue: 1,
+        tension: 300,
+        friction: 10,
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const editButtonScale = useRef(new Animated.Value(1)).current;
+    const deleteButtonScale = useRef(new Animated.Value(1)).current;
+    const playButtonScale = useRef(new Animated.Value(1)).current;
+    
     return (
-      <View style={styles.itemCard}>
+      <Animated.View
+        style={[
+          styles.itemCard,
+          {
+            opacity: opacityAnim,
+            transform: [{ translateY: translateYAnim }],
+          },
+        ]}
+      >
         <View style={styles.row}>
           <Text style={styles.durationText}>
             {Math.round((item.duration_ms || 0) / 1000)}s
           </Text>
-          <TouchableOpacity onPress={() => play(item)} style={styles.playBtn}>
-            <Text style={styles.playBtnText}>
-              {playingId === item.id ? '⏸️ Pause' : '▶️ Lire'}
-            </Text>
-          </TouchableOpacity>
+          <Pressable
+            onPress={() => play(item)}
+            onPressIn={() => handlePressIn(playButtonScale)}
+            onPressOut={() => handlePressOut(playButtonScale)}
+          >
+            <Animated.View style={[styles.playBtn, { transform: [{ scale: playButtonScale }] }]}>
+              <Text style={styles.playBtnText}>
+                {playingId === item.id ? '⏸️ Pause' : '▶️ Lire'}
+              </Text>
+            </Animated.View>
+          </Pressable>
         </View>
         
         {item.transcription ? (
@@ -449,17 +633,30 @@ export default function VoiceRecorder({ projectId }) {
               <>
                 <TextInput
                   style={styles.editInput}
-                  value={editText}
-                  onChangeText={setEditText}
+                  value={localEditText}
+                  onChangeText={setLocalEditText} // ✅ État local : pas de re-render global
                   multiline
                   autoFocus
                   placeholderTextColor="#9CA3AF"
                 />
                 <View style={styles.editActions}>
-                  <TouchableOpacity onPress={() => saveEdit(item.id)} style={styles.saveBtn}>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      // Sauvegarder avec le texte local
+                      saveEdit(item.id, localEditText);
+                    }} 
+                    style={styles.saveBtn}
+                  >
                     <Text style={styles.saveBtnText}>💾 Sauvegarder</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => { setEditingId(null); setEditText(''); }} style={styles.cancelBtn}>
+                  <TouchableOpacity 
+                    onPress={() => { 
+                      setEditingId(null); 
+                      setEditText(''); 
+                      setLocalEditText(item.transcription); // Reset local
+                    }} 
+                    style={styles.cancelBtn}
+                  >
                     <Text style={styles.cancelBtnText}>❌ Annuler</Text>
                   </TouchableOpacity>
                 </View>
@@ -477,58 +674,19 @@ export default function VoiceRecorder({ projectId }) {
                 )}
                 <Text style={styles.transcriptionDisplay}>{item.transcription}</Text>
                 <View style={styles.editActions}>
-                  <TouchableOpacity onPress={() => { setEditingId(item.id); setEditText(item.transcription); }} style={styles.editBtn}>
-                    <Text style={styles.editBtnText}>✏️ Modifier</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    onPress={async () => {
-                      const { currentClient, currentProject } = useAppStore.getState();
-                      if (!currentProject?.id || !currentClient?.id) {
-                        Alert.alert('Sélection manquante', 'Sélectionne d\'abord un client et un chantier');
-                        return;
-                      }
-
-                      try {
-                        const quoteData = generateQuoteFromTranscription(
-                          item.transcription,
-                          currentProject.id,
-                          currentClient.id,
-                          20
-                        );
-
-                        if (quoteData && quoteData.services && quoteData.services.length > 0) {
-                          const devis = await insertAutoQuote(
-                            currentProject.id,
-                            currentClient.id,
-                            quoteData.services,
-                            quoteData.totals,
-                            item.transcription,
-                            20
-                          );
-
-                          if (devis) {
-                            Alert.alert(
-                              '🎯 Devis automatique généré ✅',
-                              `${quoteData.services.length} prestation(s) détectée(s)\n\n` +
-                              `Total HT: ${quoteData.totals.totalHT.toFixed(2)} €\n` +
-                              `Total TTC: ${quoteData.totals.totalTTC.toFixed(2)} €\n\n` +
-                              `📄 Devis ${devis.numero} créé.`
-                            );
-                          } else {
-                            Alert.alert('Erreur', 'Impossible de créer le devis');
-                          }
-                        } else {
-                          Alert.alert('ℹ️ Info', 'Aucune prestation détectée dans cette transcription.');
-                        }
-                      } catch (err) {
-                        console.error('[VoiceRecorder] Erreur génération devis:', err);
-                        Alert.alert('Erreur', err.message || 'Génération échouée');
-                      }
+                  <Pressable
+                    onPress={() => { 
+                      setEditingId(item.id); 
+                      setEditText(item.transcription);
+                      // Pas besoin de setLocalEditText ici, c'est géré dans Item
                     }}
-                    style={styles.aiButton}
+                    onPressIn={() => handlePressIn(editButtonScale)}
+                    onPressOut={() => handlePressOut(editButtonScale)}
                   >
-                    <Text style={styles.aiButtonText}>🧠 Générer Devis IA</Text>
-                  </TouchableOpacity>
+                    <Animated.View style={[styles.editBtn, { transform: [{ scale: editButtonScale }] }]}>
+                      <Text style={styles.editBtnText}>✏️ Modifier</Text>
+                    </Animated.View>
+                  </Pressable>
                 </View>
               </>
             )}
@@ -536,7 +694,20 @@ export default function VoiceRecorder({ projectId }) {
         ) : (
           <Text style={styles.noTranscript}>Pas de transcription</Text>
         )}
-      </View>
+        
+        {/* Bouton Supprimer : toujours visible, même sans transcription */}
+        <View style={styles.editActions}>
+          <Pressable
+            onPress={() => deleteNote(item.id, item.storage_path)}
+            onPressIn={() => handlePressIn(deleteButtonScale)}
+            onPressOut={() => handlePressOut(deleteButtonScale)}
+          >
+            <Animated.View style={[styles.deleteBtn, { transform: [{ scale: deleteButtonScale }] }]}>
+              <Text style={styles.deleteBtnText}>🗑️ Supprimer</Text>
+            </Animated.View>
+          </Pressable>
+        </View>
+      </Animated.View>
     );
   };
 
@@ -561,38 +732,48 @@ export default function VoiceRecorder({ projectId }) {
         )}
 
         <TouchableOpacity
-          onPress={uploadAndSave}
-          style={[styles.secondary, !recordUri && { opacity: 0.5 }]}
-          disabled={!recordUri || uploading || isTranscribing}
+          onPress={() => {
+            // UX : États du bouton selon le contenu
+            // - Gris : aucun enregistrement
+            // - Bleu : enregistrement prêt
+            // - Vert : envoi réussi (2s)
+            
+            // Validation : si aucune note enregistrée, afficher toast
+            if (!recordUri) {
+              showError('Aucune note à envoyer.');
+              return;
+            }
+            
+            // Si note disponible, exécuter l'upload
+            uploadAndSave();
+          }}
+          style={[
+            styles.secondary,
+            // États visuels du bouton :
+            sendButtonState === 'empty' && !recordUri && { backgroundColor: '#64748B' }, // Gris si vide
+            sendButtonState === 'ready' && recordUri && { backgroundColor: '#3B82F6' }, // Bleu si prêt
+            sendButtonState === 'success' && { backgroundColor: '#10B981' }, // Vert après succès
+            (uploading || isTranscribing) && { opacity: 0.6 }, // Grisé pendant traitement
+          ]}
+          disabled={uploading || isTranscribing} // Désactiver seulement pendant traitement
         >
           <Text style={styles.secondaryText}>
-            {isTranscribing ? '🎤 Transcription…' : uploading ? 'Envoi…' : '☁️ Envoyer'}
+            {isTranscribing ? '🎤 Transcription…' : uploading ? 'Envoi…' : sendButtonState === 'success' ? '✅ Envoyé' : '☁️ Envoyer'}
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Overlay de transcription en cours */}
-      {isTranscribing && (
-        <View style={styles.transcriptionOverlay}>
-          <ActivityIndicator size="large" color="#4CAF50" />
-          <Text style={styles.transcriptionStatus}>
-            {transcriptionStatus}
-          </Text>
-          <View style={styles.progressBar}>
-            <View 
-              style={[
-                styles.progressFill, 
-                { width: `${transcriptionProgress}%` }
-              ]} 
-            />
-          </View>
-        </View>
-      )}
+      {/* ✅ Nouveau feedback transcription */}
+      <TranscriptionFeedback
+        isTranscribing={isTranscribing}
+        status={transcriptionStatus}
+        progress={transcriptionProgress / 100}
+      />
 
       {recordUri && !isTranscribing && (
         <View style={styles.infoContainer}>
           <Text style={styles.infoText}>
-            Durée: {Math.round(durationMs / 1000)}s • Prêt pour transcription
+            ✅ Durée: {Math.round(durationMs / 1000)}s • Prêt pour transcription
           </Text>
         </View>
       )}
@@ -616,7 +797,7 @@ export default function VoiceRecorder({ projectId }) {
       <FlatList
         data={items}
         keyExtractor={(it) => String(it.id)}
-        renderItem={({ item }) => <Item item={item} />}
+        renderItem={({ item, index }) => <Item item={item} index={index} />}
         ListEmptyComponent={<Text style={styles.emptyText}>Aucune note pour ce chantier.</Text>}
       />
     </View>
@@ -626,11 +807,31 @@ export default function VoiceRecorder({ projectId }) {
 const styles = StyleSheet.create({
   box: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderColor: '#2A2E35' },
   title: { fontWeight: '800', marginBottom: 6, color: '#EAEAEA', fontSize: 16 },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  primary: { backgroundColor: '#1D4ED8', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
-  primaryText: { color: '#fff', fontWeight: '700' },
-  secondary: { backgroundColor: '#2A2E35', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
-  secondaryText: { color: '#EAEAEA', fontWeight: '700' },
+  row: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    marginBottom: 12, // Augmenté de 8 à 12 pour harmonisation
+    gap: 12, // Espacement entre les 2 boutons
+  },
+  primary: { 
+    flex: 1, // Boutons de taille égale
+    backgroundColor: '#1D4ED8', 
+    paddingVertical: 12, // Augmenté de 8 à 12 pour cohérence
+    paddingHorizontal: 16, // Augmenté de 12 à 16
+    borderRadius: 10,
+    alignItems: 'center', // Centrer le texte
+  },
+  primaryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  secondary: { 
+    flex: 1, // Boutons de taille égale
+    backgroundColor: '#3B82F6', // Bleu par défaut (sera override selon état)
+    paddingVertical: 12, // Harmonisé avec primary
+    paddingHorizontal: 16, // Harmonisé avec primary
+    borderRadius: 10,
+    alignItems: 'center', // Centrer le texte
+  },
+  secondaryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   playBtn: { paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#1E3A8A', borderRadius: 8 },
   playBtnText: { color: '#93C5FD', fontWeight: '700' },
   transcriptionContainer: { marginBottom: 12, padding: 12, backgroundColor: '#1A1D22', borderRadius: 8, borderLeftWidth: 3, borderLeftColor: '#1D4ED8' },
@@ -640,7 +841,7 @@ const styles = StyleSheet.create({
   transcriptionBox: { marginTop: 8 },
   transcriptionDisplay: { color: '#D1D5DB', fontSize: 14, lineHeight: 20, marginBottom: 8 },
   editInput: { borderWidth: 1, borderColor: '#374151', borderRadius: 8, padding: 8, minHeight: 80, backgroundColor: '#0F1115', color: '#EAEAEA' },
-  editActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  editActions: { flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' },
   editBtn: { paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#1E3A8A', borderRadius: 8 },
   editBtnText: { color: '#93C5FD', fontWeight: '700', fontSize: 12 },
   saveBtn: { paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#10B981', borderRadius: 8 },
@@ -650,10 +851,27 @@ const styles = StyleSheet.create({
   noTranscript: { color: '#6B7280', fontSize: 12, fontStyle: 'italic' },
   aiButton: { paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#10B981', borderRadius: 8 },
   aiButtonText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  deleteBtn: { paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#DC2626', borderRadius: 8 },
+  deleteBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   durationText: { fontWeight: '700', color: '#D1D5DB' },
   emptyText: { color: '#6B7280', textAlign: 'center', marginTop: 20 },
-  infoContainer: { marginBottom: 8, padding: 8, backgroundColor: '#1A1D22', borderRadius: 6 },
-  infoText: { color: '#9CA3AF', fontSize: 12, textAlign: 'center' },
+  infoContainer: { 
+    flexDirection: 'row', // Pour aligner icône + texte
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8, // Espacement avec boutons
+    marginBottom: 12, // Harmonisé
+    padding: 10, // Augmenté de 8 à 10
+    backgroundColor: '#1A1D22', 
+    borderRadius: 8, // Augmenté de 6 à 8 pour cohérence
+    borderWidth: 1,
+    borderColor: '#10B981', // Bordure verte (état "prêt")
+  },
+  infoText: { 
+    color: '#D1D5DB', // Plus clair pour meilleure lisibilité
+    fontSize: 13, // Augmenté de 12 à 13
+    fontWeight: '600', // Plus visible
+  },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   whisperBadge: { backgroundColor: '#10B981', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   whisperBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },

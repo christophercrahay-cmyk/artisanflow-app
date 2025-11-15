@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
 import React, { useState, useEffect } from 'react';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './navigation/AppNavigator';
 import AuthScreen from './screens/AuthScreen';
@@ -9,15 +9,23 @@ import OnboardingScreen, { useOnboarding } from './screens/OnboardingScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBar from './components/NetworkStatusBar';
 import OfflineIndicator from './components/OfflineIndicator';
+import SplashScreen from './components/SplashScreen';
 import { useSafeTheme } from './theme/useSafeTheme';
 import { onAuthStateChange, getCurrentSession } from './utils/auth';
 import { initSentry } from './utils/sentryInit';
 import logger from './utils/logger';
 import { OfflineManager } from './utils/offlineManager';
 import { supabase } from './supabaseClient';
+import { initRevenueCat } from './services/payments/revenuecat';
 
 // Initialiser Sentry dès le démarrage
 initSentry();
+
+// 🔍 DIAGNOSTIC SUPABASE (à retirer après tests)
+console.log('🔍 === DIAGNOSTIC SUPABASE ===');
+console.log('Supabase URL:', supabase.supabaseUrl);
+console.log('Supabase Key (10 premiers chars):', `${supabase.supabaseKey?.substring(0, 10)  }...`);
+console.log('=================================');
 
 // Thème personnalisé pour NavigationContainer
 const CustomDarkTheme = {
@@ -37,6 +45,7 @@ export default function App() {
   const theme = useSafeTheme();
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
   const { isLoading: onboardingLoading, showOnboarding, completeOnboarding } = useOnboarding();
 
   // Vérifier session au démarrage (une seule fois)
@@ -44,7 +53,7 @@ export default function App() {
     let isMounted = true;
     
     getCurrentSession().then((initialSession) => {
-      if (!isMounted) return;
+      if (!isMounted) {return;}
       
       logger.info('App', `Session initiale: ${initialSession ? 'connecté' : 'non connecté'}`);
       setSession(initialSession);
@@ -59,6 +68,23 @@ export default function App() {
             }
           });
         }, 2000); // Attendre 2s que l'app soit prête
+        
+        // Initialiser RevenueCat après connexion (non-bloquant)
+        if (initialSession.user?.id) {
+          initRevenueCat(initialSession.user.id).catch((err) => {
+            logger.error('App', 'Erreur init RevenueCat (non-bloquant)', err);
+            
+            // ✅ Mode graceful : app continue de fonctionner
+            // Les features seront accessibles (mode essai étendu temporaire)
+            if (__DEV__) {
+              Alert.alert(
+                '⚠️ Erreur de connexion',
+                'Impossible de vérifier votre abonnement. Vous pouvez continuer à utiliser l\'app normalement.\n\nErreur: ' + (err?.message || 'Inconnue'),
+                [{ text: 'OK' }]
+              );
+            }
+          });
+        }
       }
     });
 
@@ -78,6 +104,15 @@ export default function App() {
         setTimeout(() => {
           OfflineManager.processQueue(supabase);
         }, 2000);
+        
+        // Initialiser RevenueCat après connexion
+        if (newSession.user?.id) {
+          initRevenueCat(newSession.user.id).catch((err) => {
+            if (__DEV__) {
+              logger.error('App', 'Erreur init RevenueCat', err);
+            }
+          });
+        }
       }
     });
 
@@ -103,6 +138,11 @@ export default function App() {
       clearInterval(networkInterval);
     };
   }, []); // Exécuté une seule fois au montage
+
+  // ✅ Afficher le SplashScreen animé au démarrage
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
 
   if (loading || onboardingLoading) {
     return (

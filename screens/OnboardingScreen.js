@@ -113,7 +113,7 @@ export default function OnboardingScreen({ onComplete }) {
           style={[
             styles.iconContainer,
             { transform: [{ scale }], opacity },
-            { backgroundColor: item.color + '20' },
+            { backgroundColor: `${item.color  }20` },
           ]}
         >
           <Feather name={item.icon} size={80} color={item.color} strokeWidth={2.5} />

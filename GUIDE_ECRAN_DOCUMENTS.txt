@@ -1,0 +1,163 @@
+═══════════════════════════════════════════════════════════════
+  ✅ ÉCRAN DOCUMENTS - GUIDE RAPIDE
+═══════════════════════════════════════════════════════════════
+
+📋 RÉSUMÉ
+─────────────────────────────────────────────────────────────
+
+Un nouvel écran "Documents" a été créé pour gérer tous les
+devis et factures en un seul endroit.
+
+✅ Filtres : Tous / Devis / Factures
+✅ Cartes avec infos complètes
+✅ Gestion des statuts (Brouillon → Envoyé → Signé)
+✅ Boutons d'action (👁 voir, 🗑 supprimer)
+✅ Plus de "?" devant FACTURES
+
+═══════════════════════════════════════════════════════════════
+  🎯 FONCTIONNALITÉS
+═══════════════════════════════════════════════════════════════
+
+1️⃣ FILTRES
+─────────────────────────────────────────────────────────────
+
+En haut de l'écran, 3 boutons :
+
+┌─────────┬─────────┬─────────────┐
+│  TOUS   │ 📋 DEVIS│ 💰 FACTURES │
+└─────────┴─────────┴─────────────┘
+
+• TOUS : affiche tout
+• 📋 DEVIS : uniquement les devis
+• 💰 FACTURES : uniquement les factures
+
+─────────────────────────────────────────────────────────────
+
+2️⃣ CARTES DE DOCUMENTS
+─────────────────────────────────────────────────────────────
+
+Chaque document s'affiche comme ça :
+
+┌─────────────────────────────────────────┐
+│ 📋 DEVIS              640.80 €          │
+│ DE-2025-0001                            │
+│                                         │
+│ Client Test                             │
+│ Projet Test                             │
+│                                         │
+│ [Brouillon]              👁  🗑         │
+└─────────────────────────────────────────┘
+
+Infos affichées :
+• Type (📋 DEVIS ou 💰 FACTURE)
+• Numéro (ex: DE-2025-0001)
+• Montant TTC
+• Nom du client
+• Titre du projet
+• Badge de statut (cliquable)
+• Boutons d'action
+
+─────────────────────────────────────────────────────────────
+
+3️⃣ GESTION DES STATUTS
+─────────────────────────────────────────────────────────────
+
+Le badge de statut change de couleur :
+
+• [Brouillon] → Gris
+• [Envoyé]    → Bleu
+• [Signé]     → Vert
+
+CLIQUER SUR LE BADGE pour changer le statut :
+
+Si Brouillon :
+  → Marquer comme Envoyé
+  → Marquer comme Signé
+
+Si Envoyé :
+  → Revenir en Brouillon
+  → Marquer comme Signé
+
+Si Signé :
+  → Revenir en Envoyé
+  → Revenir en Brouillon
+
+─────────────────────────────────────────────────────────────
+
+4️⃣ BOUTONS D'ACTION
+─────────────────────────────────────────────────────────────
+
+👁 VOIR
+• Ouvre le PDF du document
+• Si pas de PDF : le génère automatiquement
+• Permet de partager (WhatsApp, email, etc.)
+
+🗑 SUPPRIMER
+• Visible UNIQUEMENT si statut = Brouillon
+• Supprime définitivement le document
+• Demande confirmation avant suppression
+
+═══════════════════════════════════════════════════════════════
+  🧪 COMMENT TESTER
+═══════════════════════════════════════════════════════════════
+
+1. Ouvrir l'app
+2. Aller dans Pro > Documents
+3. Vérifier que "FACTURES" n'a plus de "?"
+4. Tester les filtres (Tous / Devis / Factures)
+5. Cliquer sur un badge de statut
+6. Changer le statut (ex: Brouillon → Envoyé)
+7. Cliquer sur 👁 pour voir le PDF
+8. Trouver un document en Brouillon
+9. Cliquer sur 🗑 pour le supprimer
+
+═══════════════════════════════════════════════════════════════
+  🗄️ VÉRIFICATIONS SUPABASE
+═══════════════════════════════════════════════════════════════
+
+Si besoin, ajouter les colonnes manquantes :
+
+```sql
+ALTER TABLE devis ADD COLUMN IF NOT EXISTS pdf_url TEXT;
+ALTER TABLE devis ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE devis ADD COLUMN IF NOT EXISTS signed_at TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE factures ADD COLUMN IF NOT EXISTS pdf_url TEXT;
+ALTER TABLE factures ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE factures ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP WITH TIME ZONE;
+```
+
+═══════════════════════════════════════════════════════════════
+  📁 FICHIERS
+═══════════════════════════════════════════════════════════════
+
+Créé :
+• screens/DocumentsScreen.js (nouveau)
+
+Modifié :
+• DevisFactures.js (emoji factures corrigé)
+
+═══════════════════════════════════════════════════════════════
+  ✅ RÉSULTAT
+═══════════════════════════════════════════════════════════════
+
+AVANT :
+❌ Pas d'écran centralisé
+❌ Gestion des statuts compliquée
+❌ "?" devant FACTURES
+
+APRÈS :
+✅ Écran Documents unifié
+✅ Filtres clairs
+✅ Gestion des statuts intuitive
+✅ Boutons d'action visibles
+✅ Plus de "?" devant FACTURES
+
+═══════════════════════════════════════════════════════════════
+
+Date : 7 novembre 2025
+Version : 1.2.0
+Status : ✅ Prêt pour les tests
+
+Prochaine étape : TESTER sur le device !
+

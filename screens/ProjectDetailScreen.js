@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,38 +13,36 @@ import {
   Linking,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import * as Sharing from 'expo-sharing';
 import { supabase } from '../supabaseClient';
 import { useAppStore } from '../store/useAppStore';
 import PhotoUploader from '../PhotoUploader';
 import VoiceRecorder from '../VoiceRecorder';
 import DevisFactures from '../DevisFactures';
-import { generateDevisPDF } from '../utils/utils/pdf';
+import DevisAIGenerator from '../components/DevisAIGenerator2';
+import FactureAIGenerator from '../components/FactureAIGenerator';
+import CollapsibleSection from '../components/CollapsibleSection';
 import { useSafeTheme } from '../theme/useSafeTheme';
 import { Feather } from '@expo/vector-icons';
 import logger from '../utils/logger';
 import { showSuccess, showError } from '../components/Toast';
+import { getCurrentUser } from '../utils/auth';
 
-export default function ProjectDetailScreen({ route }) {
+export default function ProjectDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const theme = useSafeTheme();
   const { projectId } = route.params;
   const [project, setProject] = useState(null);
   const [client, setClient] = useState(null);
-  const [showPDFForm, setShowPDFForm] = useState(false);
-  const [generatingPDF, setGeneratingPDF] = useState(false);
-
-  const [companyName, setCompanyName] = useState('Mon Entreprise');
-  const [companySiret, setCompanySiret] = useState('');
-  const [companyAddress, setCompanyAddress] = useState('');
-  const [companyPhone, setCompanyPhone] = useState('');
-  const [companyEmail, setCompanyEmail] = useState('');
-  const [pdfLines, setPdfLines] = useState([
-    { designation: 'Main d\'œuvre', quantity: '1', unit: 'jour', unitPriceHT: '300' },
-  ]);
-  const [tvaPercent, setTvaPercent] = useState('20');
+  const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [notesRefreshKey, setNotesRefreshKey] = useState(0);
   const [showTextNoteModal, setShowTextNoteModal] = useState(false);
   const [textNote, setTextNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
@@ -55,120 +53,230 @@ export default function ProjectDetailScreen({ route }) {
     loadData();
   }, [projectId]);
 
+  // Rafraîchir automatiquement quand l'écran devient visible
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+      // Forcer le rafraîchissement de VoiceRecorder
+      setNotesRefreshKey(prev => prev + 1);
+    }, [])
+  );
+
   const loadData = async () => {
     try {
+      // ✅ Vérifier que l'utilisateur est connecté
+      const user = await getCurrentUser();
+      if (!user) {
+        logger.warn('ProjectDetail', 'Pas de user connecté');
+        showError('Utilisateur non authentifié');
+        return;
+      }
+
+      // ✅ Charger le projet avec vérification user_id pour isolation multi-tenant
       const { data: projData, error: projErr } = await supabase
         .from('projects')
         .select('*')
         .eq('id', projectId)
+        .eq('user_id', user.id) // ✅ Filtre obligatoire pour isolation utilisateurs
         .single();
 
       if (projErr) {
-        console.error('Erreur chargement projet:', projErr);
+        // PGRST116 = aucune ligne trouvée (projet n'existe pas ou n'appartient pas à l'utilisateur)
+        if (projErr.code === 'PGRST116') {
+          logger.warn('ProjectDetail', 'Projet non trouvé ou accès non autorisé');
+          showError('Projet non trouvé ou accès non autorisé');
+          navigation.goBack(); // Retourner en arrière si accès non autorisé
+          return;
+        }
+        logger.error('ProjectDetail', 'Erreur chargement projet', projErr);
         showError('Impossible de charger le projet');
         return;
       }
       
-      if (projData) {
-        setProject(projData);
-        useAppStore.getState().setCurrentProject(projData);
+      if (!projData) {
+        logger.warn('ProjectDetail', 'Projet non trouvé');
+        showError('Projet non trouvé');
+        navigation.goBack();
+        return;
+      }
+
+      // ✅ Vérifier que le projet appartient bien à l'utilisateur (double vérification)
+      if (projData.user_id !== user.id) {
+        logger.warn('ProjectDetail', 'Tentative d\'accès non autorisé', { 
+          projectUserId: projData.user_id, 
+          currentUserId: user.id 
+        });
+        showError('Accès non autorisé à ce projet');
+        navigation.goBack();
+        return;
+      }
+      
+      setProject(projData);
+      useAppStore.getState().setCurrentProject(projData);
+      
+      if (projData.client_id) {
+        const { data: clientData, error: clientErr } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('id', projData.client_id)
+          .eq('user_id', user.id) // ✅ Filtre obligatoire pour isolation utilisateurs
+          .single();
         
-        if (projData.client_id) {
-          const { data: clientData, error: clientErr } = await supabase
-            .from('clients')
-            .select('*')
-            .eq('id', projData.client_id)
-            .single();
-          
-          if (clientErr) {
-            console.error('Erreur chargement client:', clientErr);
-          } else if (clientData) {
-            setClient(clientData);
-            useAppStore.getState().setCurrentClient(clientData);
+        if (clientErr) {
+          // PGRST116 = aucune ligne trouvée (client peut ne plus exister)
+          if (clientErr.code === 'PGRST116') {
+            logger.warn('ProjectDetail', 'Client non trouvé (peut avoir été supprimé)');
+          } else {
+            logger.error('ProjectDetail', 'Erreur chargement client', clientErr);
           }
+        } else if (clientData) {
+          setClient(clientData);
+          useAppStore.getState().setCurrentClient(clientData);
         }
       }
     } catch (err) {
-      console.error('Exception chargement données:', err);
+      logger.error('ProjectDetail', 'Exception chargement données', err);
       showError('Erreur lors du chargement');
     }
   };
 
-  const handleGeneratePDF = async () => {
-    if (!client || !project) {
-      showError('Client ou chantier introuvable');
-      return;
-    }
 
+  const handleChangeStatus = async (newStatus) => {
     try {
-      setGeneratingPDF(true);
-
-      const company = {
-        name: companyName.trim(),
-        siret: companySiret.trim(),
-        address: companyAddress.trim(),
-        phone: companyPhone.trim(),
-        email: companyEmail.trim(),
-      };
-
-      const clientData = {
-        name: client.name,
-        address: client.address,
-        phone: client.phone,
-        email: client.email,
-      };
-
-      const projectData = {
-        title: project.name,
-        address: project.address,
-      };
-
-      const lignes = pdfLines
-        .filter((l) => l.designation.trim())
-        .map((l) => ({
-          designation: l.designation.trim(),
-          quantity: parseFloat(l.quantity) || 0,
-          unit: l.unit.trim(),
-          unitPriceHT: parseFloat(l.unitPriceHT) || 0,
-        }));
-
-      const { pdfUrl, number, localUri } = await generateDevisPDF({
-        company,
-        client: clientData,
-        project: projectData,
-        lignes,
-        tva: parseFloat(tvaPercent) || 20,
-      });
-
-      try {
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable && localUri) {
-          await Sharing.shareAsync(localUri, {
-            mimeType: 'application/pdf',
-            dialogTitle: `Devis ${number}`,
-          });
-        } else {
-          if (pdfUrl) {
-            const canOpen = await Linking.canOpenURL(pdfUrl);
-            if (canOpen) {
-              await Linking.openURL(pdfUrl);
-            }
-          }
-        }
-      } catch (shareErr) {
-        console.error('Erreur partage PDF:', shareErr);
+      logger.info('ProjectDetail', `Changement statut vers: ${newStatus}`);
+      
+      const { error } = await supabase
+        .from('projects')
+        .update({ status: newStatus })
+        .eq('id', projectId);
+      
+      if (error) {
+        logger.error('ProjectDetail', 'Erreur changement statut', error);
+        throw error;
       }
-
-      Alert.alert(
-        'PDF généré ✅',
-        `Le devis ${number} a été créé et ouvert.`,
-        [{ text: 'OK', onPress: () => setShowPDFForm(false) }]
-      );
+      
+      // Mettre à jour le state local
+      setProject({ ...project, status: newStatus });
+      
+      const statusLabels = {
+        active: 'Actif',
+        in_progress: 'En cours',
+        planned: 'Planifié',
+        done: 'Terminé',
+      };
+      
+      showSuccess(`Statut changé : ${statusLabels[newStatus] || newStatus}`);
+      setShowStatusModal(false);
+      
+      logger.success('ProjectDetail', 'Statut changé', { newStatus });
     } catch (err) {
-      console.error('Erreur génération PDF:', err);
-      showError(err.message || 'Impossible de générer le PDF');
-    } finally {
-      setGeneratingPDF(false);
+      logger.error('ProjectDetail', 'Exception changement statut', err);
+      showError('Impossible de changer le statut');
+    }
+  };
+
+  const handleArchiveProject = async () => {
+    Alert.alert(
+      'Archiver le chantier',
+      `Voulez-vous archiver "${project.name}" ?\n\nLe chantier sera masqué mais conservé dans l'historique.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Archiver',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('projects')
+                .update({
+                  archived: true,
+                  archived_at: new Date().toISOString(),
+                })
+                .eq('id', projectId);
+
+              if (error) {
+                showError('Impossible d\'archiver le chantier');
+                return;
+              }
+
+              // ✅ Nettoyer le store pour éviter le cache
+              useAppStore.getState().clearProject();
+              
+              showSuccess('Chantier archivé');
+              navigation.goBack();
+            } catch (err) {
+              showError('Erreur lors de l\'archivage');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleUnarchiveProject = async () => {
+    Alert.alert(
+      'Désarchiver le chantier',
+      `Voulez-vous restaurer "${project.name}" ?\n\nLe chantier redeviendra visible dans vos listes.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Désarchiver',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('projects')
+                .update({
+                  archived: false,
+                  archived_at: null,
+                })
+                .eq('id', projectId);
+
+              if (error) {
+                showError('Impossible de désarchiver le chantier');
+                return;
+              }
+
+              showSuccess('Chantier restauré');
+              await loadData(); // Recharger pour mettre à jour l'affichage
+            } catch (err) {
+              showError('Erreur lors de la restauration');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteProject = () => {
+    // Fermer le menu et ouvrir la modal de confirmation moderne
+    setShowProjectMenu(false);
+    setTimeout(() => setShowDeleteConfirmModal(true), 300);
+  };
+
+  const confirmDeleteProject = async () => {
+    try {
+      setDeletingProject(true);
+      
+      // Suppression en cascade via le store Zustand
+      // ✅ Supprime en DB ET met à jour le state global
+      await useAppStore.getState().deleteProject(projectId);
+
+      logger.success('ProjectDetail', 'Projet supprimé', { projectId });
+      
+      // Fermer la modal
+      setShowDeleteConfirmModal(false);
+      setDeletingProject(false);
+      
+      // Toast de succès
+      showSuccess('Chantier supprimé avec succès');
+      
+      // Retour à l'écran précédent (liste rafraîchie automatiquement)
+      setTimeout(() => navigation.goBack(), 300);
+    } catch (err) {
+      logger.error('ProjectDetail', 'Exception suppression', err);
+      setDeletingProject(false);
+      showError(err.message || 'Erreur lors de la suppression. Veuillez réessayer.');
     }
   };
 
@@ -186,7 +294,7 @@ export default function ProjectDetailScreen({ route }) {
       logger.info('ProjectDetail', 'Enregistrement note texte', { projectId });
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Utilisateur non authentifié');
+      if (!user) {throw new Error('Utilisateur non authentifié');}
 
       const noteData = {
         project_id: projectId,
@@ -196,18 +304,30 @@ export default function ProjectDetailScreen({ route }) {
         transcription: noteTextToSave, // Utiliser transcription pour les notes texte aussi
       };
 
-      const { error } = await supabase.from('notes').insert([noteData]);
+      // ✅ Utiliser .select() pour récupérer la note insérée
+      const { data, error } = await supabase
+        .from('notes')
+        .insert([noteData])
+        .select();
+
       if (error) {
         logger.error('ProjectDetail', 'Erreur insertion note', error);
         throw error;
       }
 
       logger.success('ProjectDetail', 'Note texte enregistrée');
-      showSuccess(`Note ajoutée au chantier "${project.name}"`);
       
-      // Reset seulement en cas de succès
+      // ✅ Forcer le rechargement de VoiceRecorder en changeant sa clé
+      setNotesRefreshKey(prev => prev + 1);
+      
+      // Reset et fermer modal
       setShowTextNoteModal(false);
       setTextNote('');
+      
+      // ✅ Afficher toast APRÈS fermeture modal
+      setTimeout(() => {
+        showSuccess(`Note ajoutée au chantier "${project.name}"`);
+      }, 300);
     } catch (err) {
       logger.error('ProjectDetail', 'Exception note texte', err);
       showError(err.message || 'Erreur lors de l\'enregistrement de la note. Vérifiez votre connexion.');
@@ -219,20 +339,45 @@ export default function ProjectDetailScreen({ route }) {
 
   const getStatusConfig = (status) => {
     switch (status) {
-      case 'planned':
-        return { icon: 'clock', label: 'Planifié', color: theme.colors.warning };
+      case 'active':
+        return { icon: 'play-circle', label: 'Actif', color: '#16A34A' }; // Vert vif
       case 'in_progress':
-        return { icon: 'play-circle', label: 'En cours', color: theme.colors.accent };
+        return { icon: 'play-circle', label: 'En cours', color: '#16A34A' }; // Vert vif
+      case 'planned':
+        return { icon: 'clock', label: 'Planifié', color: '#F59E0B' }; // Orange vif
       case 'done':
-        return { icon: 'check-circle', label: 'Terminé', color: theme.colors.success };
+        return { icon: 'check-circle', label: 'Terminé', color: '#3B82F6' }; // Bleu vif
       default:
-        return { icon: 'help-circle', label: status, color: theme.colors.textSecondary };
+        return { icon: 'play-circle', label: 'En cours', color: '#16A34A' }; // Par défaut = En cours (vert)
     }
   };
 
   if (!project) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
+        {/* Bouton retour même pendant le chargement */}
+        <View style={{ paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.lg }}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              // Pendant le chargement, naviguer vers la liste des clients
+              navigation.dispatch(
+                CommonActions.navigate({
+                  name: 'Main',
+                  params: {
+                    screen: 'ClientsTab',
+                    params: {
+                      screen: 'ClientsList',
+                    },
+                  },
+                })
+              );
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="arrow-left" size={24} color={theme.colors.text} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
         <View style={{ flex: 1, justifyContent: 'center' }}>
           <ActivityIndicator size="large" color={theme.colors.accent} />
           <Text style={styles.loading}>Chargement...</Text>
@@ -243,11 +388,88 @@ export default function ProjectDetailScreen({ route }) {
 
   const statusConfig = getStatusConfig(project.status || project.status_text);
 
+  // ⚠️ NAVIGATION VERROUILLÉE - NE PAS MODIFIER SANS RAISON VALABLE
+  // Fonction pour gérer le retour : toujours vers le client ou la liste
+  // Utilise goBack() si possible, sinon reset() pour éviter les boucles
+  const handleGoBack = () => {
+    // Si on peut revenir en arrière dans le stack actuel, utiliser goBack()
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    // Sinon, réinitialiser la navigation vers le bon écran
+    if (project?.client_id) {
+      // Réinitialiser vers ClientDetail dans ClientsTab
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 1,
+          routes: [
+            {
+              name: 'Main',
+              state: {
+                routes: [
+                  {
+                    name: 'ClientsTab',
+                    state: {
+                      routes: [
+                        { name: 'ClientsList' },
+                        {
+                          name: 'ClientDetail',
+                          params: { clientId: project.client_id },
+                        },
+                      ],
+                      index: 1,
+                    },
+                  },
+                ],
+                index: 0,
+              },
+            },
+          ],
+        })
+      );
+    } else {
+      // Réinitialiser vers ClientsList
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'Main',
+              state: {
+                routes: [
+                  {
+                    name: 'ClientsTab',
+                    state: {
+                      routes: [{ name: 'ClientsList' }],
+                      index: 0,
+                    },
+                  },
+                ],
+                index: 0,
+              },
+            },
+          ],
+        })
+      );
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
         ListHeaderComponent={
           <View style={styles.header}>
+            {/* Bouton retour */}
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={handleGoBack}
+              activeOpacity={0.7}
+            >
+              <Feather name="arrow-left" size={24} color={theme.colors.text} strokeWidth={2.5} />
+            </TouchableOpacity>
+            
             <View style={styles.projectHeader}>
               <View style={styles.avatarContainer}>
                 <Feather name="folder" size={32} color={theme.colors.accent} strokeWidth={2.5} />
@@ -267,7 +489,7 @@ export default function ProjectDetailScreen({ route }) {
                   </View>
                 ) : null}
                 <View style={styles.statusRow}>
-                  <View style={[styles.statusBadge, { backgroundColor: statusConfig.color + '20' }]}>
+                  <View style={[styles.statusBadge, { backgroundColor: `${statusConfig.color  }20` }]}>
                     <Feather name={statusConfig.icon} size={14} color={statusConfig.color} />
                     <Text style={[styles.statusText, { color: statusConfig.color }]}>
                       {statusConfig.label}
@@ -275,6 +497,13 @@ export default function ProjectDetailScreen({ route }) {
                   </View>
                 </View>
               </View>
+              <TouchableOpacity
+                style={styles.menuIconButton}
+                onPress={() => setShowProjectMenu(true)}
+                activeOpacity={0.7}
+              >
+                <Feather name="more-vertical" size={24} color={theme.colors.text} strokeWidth={2.5} />
+              </TouchableOpacity>
             </View>
           </View>
         }
@@ -282,192 +511,187 @@ export default function ProjectDetailScreen({ route }) {
         keyExtractor={() => 'single'}
         renderItem={() => (
           <View style={styles.content}>
-            <View style={styles.journalSection}>
-              <View style={styles.journalHeader}>
-                <Feather name="book-open" size={20} color={theme.colors.accent} />
-                <Text style={styles.journalTitle}>Journal de chantier</Text>
+            {/* Photos de chantier - Menu déroulant */}
+            <CollapsibleSection
+              title="Photos de chantier"
+              icon="image"
+              defaultExpanded={false}
+            >
+              <PhotoUploader projectId={projectId} />
+            </CollapsibleSection>
+
+            {/* Journal de bord - Menu déroulant */}
+            <CollapsibleSection
+              title="Journal de bord"
+              icon="book-open"
+              defaultExpanded={false}
+            >
+              <View style={styles.journalSection}>
+                <Text style={styles.journalSubtitle}>
+                  Capturez les événements de ce chantier
+                </Text>
+                <TouchableOpacity
+                  style={styles.addNoteButton}
+                  onPress={() => setShowTextNoteModal(true)}
+                  activeOpacity={0.7}
+                >
+                  <Feather name="edit-3" size={18} color={theme.colors.text} strokeWidth={2.5} />
+                  <Text style={styles.addNoteButtonText}>Ajouter une note texte</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.journalSubtitle}>
-                Capturez les événements de ce chantier
+            </CollapsibleSection>
+
+            {/* Notes vocales - Menu déroulant */}
+            <CollapsibleSection
+              title="Notes vocales"
+              icon="mic"
+              defaultExpanded={false}
+            >
+              <VoiceRecorder key={notesRefreshKey} projectId={projectId} />
+            </CollapsibleSection>
+
+            {/* 🤖 Générateur Devis IA */}
+            <View style={styles.aiGeneratorSection}>
+              <Text style={styles.sectionTitle}>
+                <Feather name="zap" size={18} color="#8B5CF6" />
+                {' '}Devis IA
               </Text>
-              <TouchableOpacity
-                style={styles.addNoteButton}
-                onPress={() => setShowTextNoteModal(true)}
-                activeOpacity={0.7}
-              >
-                <Feather name="edit-3" size={18} color={theme.colors.text} strokeWidth={2.5} />
-                <Text style={styles.addNoteButtonText}>Ajouter une note texte</Text>
-              </TouchableOpacity>
+              <DevisAIGenerator 
+                projectId={projectId} 
+                clientId={project?.client_id}
+                onDevisCreated={loadData}
+                navigation={navigation}
+              />
             </View>
 
-            <PhotoUploader projectId={projectId} />
-            <VoiceRecorder projectId={projectId} />
-            
-            <TouchableOpacity
-              style={styles.pdfButton}
-              onPress={() => setShowPDFForm(true)}
-              activeOpacity={0.7}
-            >
-              <Feather name="file-text" size={20} color={theme.colors.text} strokeWidth={2.5} />
-              <Text style={styles.pdfButtonText}>Générer un devis PDF</Text>
-            </TouchableOpacity>
+            {/* 🤖 Générateur Facture IA */}
+            <View style={styles.aiGeneratorSection}>
+              <Text style={styles.sectionTitle}>
+                <Feather name="zap" size={18} color="#8B5CF6" />
+                {' '}Facture IA
+              </Text>
+              <FactureAIGenerator 
+                projectId={projectId} 
+                clientId={project?.client_id}
+                onFactureCreated={loadData}
+                navigation={navigation}
+              />
+            </View>
 
-            <DevisFactures projectId={projectId} clientId={project?.client_id} type="devis" />
-            <DevisFactures projectId={projectId} clientId={project?.client_id} type="facture" />
+            {/* Section Devis & Factures */}
+            <View style={styles.devisFacturesSection}>
+              <DevisFactures projectId={projectId} clientId={project?.client_id} type="devis" />
+            </View>
+
+            <View style={styles.devisFacturesSection}>
+              <DevisFactures projectId={projectId} clientId={project?.client_id} type="facture" />
+            </View>
             <View style={{ height: insets.bottom }} />
           </View>
         )}
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Modale formulaire PDF */}
-      <Modal visible={showPDFForm} animationType="slide" transparent={true}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-            <View style={styles.modalHeader}>
-              <Feather name="file-text" size={24} color={theme.colors.accent} />
-              <Text style={styles.modalTitle}>Générer un devis PDF</Text>
+      {/* ✨ Modal menu projet (Archiver / Supprimer) - Refonte */}
+      <Modal
+        visible={showProjectMenu}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowProjectMenu(false)}
+      >
+        <Pressable 
+          style={styles.menuOverlay} 
+          onPress={() => setShowProjectMenu(false)}
+        >
+          <Pressable style={styles.menuContent} onPress={(e) => e.stopPropagation()}>
+            {/* Titre de la modal */}
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle}>Actions du chantier</Text>
+              {project?.name && (
+                <Text style={styles.menuSubtitle}>{project.name}</Text>
+              )}
             </View>
-            
-            <Text style={styles.label}>Entreprise</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Nom entreprise"
-              placeholderTextColor={theme.colors.textMuted}
-              value={companyName}
-              onChangeText={setCompanyName}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="SIRET"
-              placeholderTextColor={theme.colors.textMuted}
-              value={companySiret}
-              onChangeText={setCompanySiret}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Adresse"
-              placeholderTextColor={theme.colors.textMuted}
-              value={companyAddress}
-              onChangeText={setCompanyAddress}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Téléphone"
-              placeholderTextColor={theme.colors.textMuted}
-              value={companyPhone}
-              onChangeText={setCompanyPhone}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              placeholderTextColor={theme.colors.textMuted}
-              keyboardType="email-address"
-              value={companyEmail}
-              onChangeText={setCompanyEmail}
-            />
 
-            <Text style={styles.label}>Lignes du devis</Text>
-            {pdfLines.map((line, idx) => (
-              <View key={idx} style={styles.lineRow}>
-                <TextInput
-                  style={[styles.lineInput, { flex: 3 }]}
-                  placeholder="Désignation"
-                  placeholderTextColor={theme.colors.textMuted}
-                  value={line.designation}
-                  onChangeText={(v) => {
-                    const newLines = [...pdfLines];
-                    newLines[idx].designation = v;
-                    setPdfLines(newLines);
-                  }}
-                />
-                <TextInput
-                  style={[styles.lineInput, { flex: 1 }]}
-                  placeholder="Qté"
-                  placeholderTextColor={theme.colors.textMuted}
-                  value={line.quantity}
-                  onChangeText={(v) => {
-                    const newLines = [...pdfLines];
-                    newLines[idx].quantity = v;
-                    setPdfLines(newLines);
-                  }}
-                  keyboardType="numeric"
-                />
-                <TextInput
-                  style={[styles.lineInput, { flex: 1 }]}
-                  placeholder="Unité"
-                  placeholderTextColor={theme.colors.textMuted}
-                  value={line.unit}
-                  onChangeText={(v) => {
-                    const newLines = [...pdfLines];
-                    newLines[idx].unit = v;
-                    setPdfLines(newLines);
-                  }}
-                />
-                <TextInput
-                  style={[styles.lineInput, { flex: 1.5 }]}
-                  placeholder="P.U. HT"
-                  placeholderTextColor={theme.colors.textMuted}
-                  value={line.unitPriceHT}
-                  onChangeText={(v) => {
-                    const newLines = [...pdfLines];
-                    newLines[idx].unitPriceHT = v;
-                    setPdfLines(newLines);
-                  }}
-                  keyboardType="numeric"
-                />
-              </View>
-            ))}
+            {/* Phrase d'avertissement court */}
+            <Text style={styles.menuWarning}>
+              Les photos, notes et documents liés seront affectés.
+            </Text>
 
+            {/* Bouton Changer Statut */}
             <TouchableOpacity
-              style={styles.addLineButton}
-              onPress={() =>
-                setPdfLines([...pdfLines, { designation: '', quantity: '', unit: '', unitPriceHT: '' }])
-              }
+              style={[styles.menuButton, styles.menuStatusButton]}
+              onPress={() => {
+                setShowProjectMenu(false);
+                setTimeout(() => setShowStatusModal(true), 300);
+              }}
               activeOpacity={0.7}
             >
-              <Feather name="plus-circle" size={18} color={theme.colors.accent} />
-              <Text style={styles.addLineText}>Ajouter une ligne</Text>
+              <View style={styles.menuButtonIcon}>
+                <Feather name="edit-3" size={20} color="#FFFFFF" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.menuButtonText}>Changer le statut</Text>
             </TouchableOpacity>
 
-            <TextInput
-              style={styles.input}
-              placeholder="TVA %"
-              placeholderTextColor={theme.colors.textMuted}
-              value={tvaPercent}
-              onChangeText={setTvaPercent}
-              keyboardType="numeric"
-            />
+            {/* Bouton Archiver / Désarchiver selon le statut */}
+            {project?.archived ? (
+              <TouchableOpacity
+                style={[styles.menuButton, styles.menuUnarchiveButton]}
+                onPress={() => {
+                  setShowProjectMenu(false);
+                  setTimeout(() => handleUnarchiveProject(), 300);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.menuButtonIcon}>
+                  <Feather name="archive" size={20} color="#FFFFFF" strokeWidth={2.5} />
+                </View>
+                <Text style={styles.menuButtonText}>🔓 Désarchiver</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.menuButton, styles.menuArchiveButton]}
+                onPress={() => {
+                  setShowProjectMenu(false);
+                  setTimeout(() => handleArchiveProject(), 300);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.menuButtonIcon}>
+                  <Feather name="archive" size={20} color="#FFFFFF" strokeWidth={2.5} />
+                </View>
+                <Text style={styles.menuButtonText}>📦 Archiver</Text>
+              </TouchableOpacity>
+            )}
+            
+            {/* Bouton Supprimer */}
+            <TouchableOpacity
+              style={[styles.menuButton, styles.menuDeleteButton]}
+              onPress={() => {
+                setShowProjectMenu(false);
+                setTimeout(() => handleDeleteProject(), 300);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.menuButtonIcon}>
+                <Feather name="trash-2" size={20} color="#FFFFFF" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.menuButtonText}>Supprimer</Text>
+            </TouchableOpacity>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.generateButton, generatingPDF && { opacity: 0.6 }]}
-                onPress={handleGeneratePDF}
-                disabled={generatingPDF}
-                activeOpacity={0.7}
-              >
-                {generatingPDF ? (
-                  <ActivityIndicator color={theme.colors.text} />
-                ) : (
-                  <>
-                    <Feather name="check-circle" size={20} color={theme.colors.text} />
-                    <Text style={styles.generateButtonText}>Générer PDF</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelModalButton}
-                onPress={() => setShowPDFForm(false)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.cancelModalText}>Annuler</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
+            {/* Bouton Annuler */}
+            <TouchableOpacity
+              style={[styles.menuButton, styles.menuCancelButton]}
+              onPress={() => setShowProjectMenu(false)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.menuButtonIcon}>
+                <Feather name="x" size={20} color="#FFFFFF" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.menuButtonText}>Annuler</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Modal note texte */}
       <Modal
@@ -552,6 +776,174 @@ export default function ProjectDetailScreen({ route }) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ✨ Modal Changement Statut */}
+      <Modal
+        visible={showStatusModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowStatusModal(false)}
+      >
+        <Pressable style={styles.menuOverlay} onPress={() => setShowStatusModal(false)}>
+          <Pressable style={styles.statusModalContent} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.statusModalHeader}>
+              <Feather name="edit-3" size={24} color={theme.colors.accent} />
+              <Text style={styles.statusModalTitle}>Changer le statut</Text>
+            </View>
+
+            <Text style={styles.statusModalSubtitle}>
+              Chantier : {project?.name}
+            </Text>
+
+            {/* Options de statut */}
+            <View style={styles.statusOptions}>
+              <TouchableOpacity
+                style={[
+                  styles.statusOption,
+                  (project?.status === 'in_progress' || project?.status === 'active') && styles.statusOptionActive,
+                ]}
+                onPress={() => handleChangeStatus('in_progress')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.statusEmoji}>🟢</Text>
+                <View style={styles.statusOptionText}>
+                  <Text style={styles.statusOptionTitle}>En cours</Text>
+                  <Text style={styles.statusOptionDescription}>Travaux en cours</Text>
+                </View>
+                {(project?.status === 'in_progress' || project?.status === 'active') && (
+                  <Feather name="check" size={20} color={theme.colors.accent} />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.statusOption,
+                  project?.status === 'planned' && styles.statusOptionActive,
+                ]}
+                onPress={() => handleChangeStatus('planned')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.statusEmoji}>🟠</Text>
+                <View style={styles.statusOptionText}>
+                  <Text style={styles.statusOptionTitle}>Planifié</Text>
+                  <Text style={styles.statusOptionDescription}>En attente de démarrage</Text>
+                </View>
+                {project?.status === 'planned' && (
+                  <Feather name="check" size={20} color={theme.colors.accent} />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.statusOption,
+                  project?.status === 'done' && styles.statusOptionActive,
+                ]}
+                onPress={() => handleChangeStatus('done')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.statusEmoji}>✅</Text>
+                <View style={styles.statusOptionText}>
+                  <Text style={styles.statusOptionTitle}>Terminé</Text>
+                  <Text style={styles.statusOptionDescription}>Travaux terminés</Text>
+                </View>
+                {project?.status === 'done' && (
+                  <Feather name="check" size={20} color={theme.colors.accent} />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.statusCancelButton}
+              onPress={() => setShowStatusModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statusCancelButtonText}>Annuler</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ✨ Modal de confirmation de suppression (2ème étape) */}
+      <Modal
+        visible={showDeleteConfirmModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          if (!deletingProject) {
+            setShowDeleteConfirmModal(false);
+          }
+        }}
+      >
+        <Pressable 
+          style={styles.deleteModalOverlay}
+          onPress={() => {
+            if (!deletingProject) {
+              setShowDeleteConfirmModal(false);
+            }
+          }}
+        >
+          <Pressable style={styles.deleteModalContainer} onPress={(e) => e.stopPropagation()}>
+            {/* Icône d'avertissement rouge agrandie */}
+            <View style={styles.deleteModalIconContainer}>
+              <Feather name="alert-triangle" size={53} color="#EF4444" strokeWidth={2} />
+            </View>
+
+            {/* Titre */}
+            <Text style={styles.deleteModalTitle}>
+              Confirmer la suppression
+            </Text>
+
+            {/* Sous-texte en orange */}
+            <Text style={styles.deleteModalSubtitle}>
+              Cette action est définitive.
+            </Text>
+
+            {/* Message détaillé avec nom du chantier */}
+            <Text style={styles.deleteModalMessage}>
+              Êtes-vous sûr de vouloir supprimer le chantier{'\n'}
+              <Text style={styles.deleteModalProjectName}>"{project?.name}"</Text> ?{'\n\n'}
+              Toutes les photos, notes et documents associés seront effacés définitivement.
+            </Text>
+
+            {/* Boutons en ligne */}
+            <View style={styles.deleteModalButtons}>
+              <TouchableOpacity
+                style={[
+                  styles.deleteModalButton,
+                  styles.deleteModalCancelButton,
+                  deletingProject && { opacity: 0.6 }
+                ]}
+                onPress={() => setShowDeleteConfirmModal(false)}
+                disabled={deletingProject}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteModalCancelText}>
+                  Annuler
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.deleteModalButton,
+                  styles.deleteModalConfirmButton,
+                  deletingProject && { opacity: 0.6 }
+                ]}
+                onPress={confirmDeleteProject}
+                disabled={deletingProject}
+                activeOpacity={0.7}
+              >
+                {deletingProject ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.deleteModalConfirmText}>
+                    Supprimer définitivement
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -572,6 +964,17 @@ const getStyles = (theme) => StyleSheet.create({
     paddingTop: theme.spacing.lg,
     marginBottom: theme.spacing.md,
   },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.colors.surfaceAlt || theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
   projectHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -580,7 +983,7 @@ const getStyles = (theme) => StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: theme.colors.accent + '20',
+    backgroundColor: `${theme.colors.accent  }20`,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -614,19 +1017,281 @@ const getStyles = (theme) => StyleSheet.create({
     fontWeight: '700',
     marginLeft: theme.spacing.xs,
   },
+  menuIconButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: theme.spacing.sm,
+  },
+  // ✨ Styles pour la modal menu refonte
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)', // Semi-transparent noir
+    justifyContent: 'center', // Centrer verticalement
+    alignItems: 'center', // Centrer horizontalement
+    padding: theme.spacing.lg,
+  },
+  menuContent: {
+    backgroundColor: '#1F2937', // Gris anthracite
+    borderRadius: 20, // Coins arrondis
+    width: '85%', // 85% de l'écran
+    padding: 24,
+    ...theme.shadows.xl,
+    // Animation scale (géré par Animated dans le futur, pour l'instant juste le style)
+  },
+  menuHeader: {
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  menuTitle: {
+    ...theme.typography.h4,
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.colors.text,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xs,
+  },
+  menuSubtitle: {
+    ...theme.typography.body,
+    fontSize: 14,
+    color: '#9CA3AF', // Gris
+    textAlign: 'center',
+  },
+  menuWarning: {
+    ...theme.typography.bodySmall,
+    fontSize: 13,
+    color: '#9CA3AF', // Gris
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.sm,
+  },
+  // Boutons en pleine largeur (réduits de 20%)
+  menuButton: {
+    flexDirection: 'row',
+    alignItems: 'center',        // Alignement vertical parfait
+    justifyContent: 'center',    // Centrage horizontal
+    paddingVertical: 13,         // Réduit de 16 à 13 (~20%)
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginBottom: theme.spacing.sm,
+    width: '100%',
+  },
+  menuButtonIcon: {
+    width: 20,                   // Container fixe pour icône
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,              // Espace fixe de 8px
+  },
+  menuStatusButton: {
+    backgroundColor: '#3B82F6', // Bleu
+  },
+  menuArchiveButton: {
+    backgroundColor: '#F59E0B', // Orange
+  },
+  menuUnarchiveButton: {
+    backgroundColor: '#16A34A', // Vert
+  },
+  menuDeleteButton: {
+    backgroundColor: '#EF4444', // Rouge
+  },
+  menuCancelButton: {
+    backgroundColor: '#374151', // Gris bleuté
+    marginBottom: 16, // Respiration en bas de la modal
+  },
+  // ✨ Styles modal changement statut
+  statusModalContent: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: 20,
+    padding: 24,
+    marginHorizontal: 20,
+    maxWidth: 500,
+    alignSelf: 'center',
+    width: '90%',
+  },
+  statusModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  statusModalTitle: {
+    ...theme.typography.h3,
+    fontSize: 20,
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  statusModalSubtitle: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textSecondary,
+    marginBottom: 20,
+  },
+  statusOptions: {
+    gap: 10,
+    marginBottom: 20,
+  },
+  statusOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surfaceElevated,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+  },
+  statusOptionActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: `${theme.colors.accent  }15`,
+  },
+  statusEmoji: {
+    fontSize: 24,
+  },
+  statusOptionText: {
+    flex: 1,
+  },
+  statusOptionTitle: {
+    ...theme.typography.body,
+    fontWeight: '600',
+    color: theme.colors.text,
+    marginBottom: 2,
+  },
+  statusOptionDescription: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+  },
+  statusCancelButton: {
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  statusCancelButtonText: {
+    ...theme.typography.body,
+    fontWeight: '600',
+    color: theme.colors.textSecondary,
+  },
+  menuButtonText: {
+    ...theme.typography.body,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF', // Blanc pur
+    textAlign: 'center',
+    lineHeight: 20,              // Alignement vertical avec icône
+  },
+  // ✨ Styles pour la modal de confirmation de suppression (2ème étape)
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)', // Noir semi-transparent cohérent
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  deleteModalContainer: {
+    backgroundColor: '#1F2937', // Gris anthracite cohérent avec 1ère modal
+    borderRadius: 20, // Cohérent avec 1ère modal
+    padding: 24, // Padding généreux
+    width: '85%', // Même largeur que 1ère modal
+    ...theme.shadows.xl,
+    alignItems: 'center',
+  },
+  deleteModalIconContainer: {
+    width: 88, // +10% de 80px
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#EF4444' + '15', // Rouge 15% opacity
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.lg,
+  },
+  deleteModalTitle: {
+    ...theme.typography.h3,
+    fontSize: 20, // Cohérent avec titre 1ère modal
+    fontWeight: '700',
+    color: theme.colors.text,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xs,
+  },
+  deleteModalSubtitle: {
+    ...theme.typography.body,
+    fontSize: 14,
+    color: '#F59E0B', // Orange clair (warning)
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+    fontWeight: '600',
+  },
+  deleteModalMessage: {
+    ...theme.typography.body,
+    fontSize: 15,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: theme.spacing.xxl,
+  },
+  deleteModalProjectName: {
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  deleteModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  deleteModalButton: {
+    flex: 1,
+    paddingVertical: 14, // Légèrement plus compact
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 50,
+  },
+  deleteModalCancelButton: {
+    backgroundColor: '#3B82F6', // Bleu clair (accent)
+  },
+  deleteModalConfirmButton: {
+    backgroundColor: '#EF4444', // Rouge
+  },
+  deleteModalCancelText: {
+    ...theme.typography.body,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF', // Blanc pur
+  },
+  deleteModalConfirmText: {
+    ...theme.typography.body,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF', // Blanc pur
+  },
   content: {
     paddingHorizontal: theme.spacing.lg,
   },
-  journalSection: {
-    marginBottom: theme.spacing.xl,
-    paddingBottom: theme.spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+  aiGeneratorSection: {
+    marginTop: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
   },
-  journalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.xs,
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginBottom: theme.spacing.md,
+  },
+  devisFacturesSection: {
+    marginTop: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
+  journalSection: {
+    paddingTop: theme.spacing.sm,
   },
   journalTitle: {
     ...theme.typography.h4,
@@ -638,9 +1303,9 @@ const getStyles = (theme) => StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   addNoteButton: {
-    backgroundColor: theme.colors.accent + '20',
+    backgroundColor: `${theme.colors.accent  }20`,
     borderWidth: 1,
-    borderColor: theme.colors.accent + '40',
+    borderColor: `${theme.colors.accent  }40`,
     paddingVertical: theme.spacing.md,
     paddingHorizontal: theme.spacing.lg,
     borderRadius: theme.borderRadius.md,
@@ -654,16 +1319,6 @@ const getStyles = (theme) => StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.text,
   },
-  pdfButton: {
-    ...theme.buttons.primary,
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    marginVertical: theme.spacing.lg,
-  },
-  pdfButtonText: { 
-    ...theme.typography.body,
-    fontWeight: '700',
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -675,70 +1330,5 @@ const getStyles = (theme) => StyleSheet.create({
     borderTopRightRadius: theme.borderRadius.xl,
     maxHeight: '90%',
     padding: theme.spacing.lg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.lg,
-  },
-  modalTitle: { 
-    ...theme.typography.h3,
-    marginLeft: theme.spacing.sm,
-  },
-  label: { 
-    ...theme.typography.caption,
-    marginBottom: theme.spacing.sm,
-    color: theme.colors.text,
-    marginTop: theme.spacing.sm,
-  },
-  input: {
-    ...theme.input,
-    marginBottom: theme.spacing.md,
-  },
-  lineRow: { 
-    flexDirection: 'row', 
-    gap: theme.spacing.sm, 
-    marginBottom: theme.spacing.sm,
-  },
-  lineInput: {
-    ...theme.input,
-    minHeight: 48,
-  },
-  addLineButton: {
-    backgroundColor: theme.colors.accent + '20',
-    paddingVertical: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
-    alignItems: 'center',
-    marginBottom: theme.spacing.md,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: theme.spacing.xs,
-  },
-  addLineText: { 
-    ...theme.typography.caption,
-    color: theme.colors.accent,
-    fontWeight: '700',
-  },
-  modalActions: { 
-    flexDirection: 'row', 
-    gap: theme.spacing.md, 
-    marginTop: theme.spacing.lg,
-  },
-  generateButton: {
-    ...theme.buttons.primary,
-    flex: 1,
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-  },
-  generateButtonText: {
-    ...theme.buttons.primaryText,
-  },
-  cancelModalButton: {
-    ...theme.buttons.secondary,
-    flex: 1,
-  },
-  cancelModalText: { 
-    ...theme.buttons.secondaryText,
-    color: theme.colors.error,
   },
 });

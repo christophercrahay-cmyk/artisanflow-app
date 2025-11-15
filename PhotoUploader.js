@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, FlatList, Image, ActivityIndicator, StyleSheet, Alert, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, Image, ActivityIndicator, StyleSheet, Alert, Dimensions, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import ImageViewing from 'react-native-image-viewing';
 import { supabase } from './supabaseClient';
@@ -9,43 +10,72 @@ import { useSafeTheme } from './theme/useSafeTheme';
 import { Feather } from '@expo/vector-icons';
 import { compressImage } from './services/imageCompression';
 import { showSuccess, showError } from './components/Toast';
+import logger from './utils/logger';
 
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
 
 export default function PhotoUploader({ projectId }) {
+  // ⚠️ PHOTO UPLOADER VERROUILLÉ - NE PAS MODIFIER SANS RAISON VALABLE
+  // Ce composant gère l'upload, l'affichage et la suppression des photos de chantier
+  // - Upload avec géolocalisation et reverse geocoding en arrière-plan
+  // - Viewer plein écran avec navigation
+  // - Suppression avec confirmation
+  
   const theme = useSafeTheme();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const [photos, setPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   
   // États pour le visualiseur plein écran
   const [isViewerVisible, setIsViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
 
+  // ═══════════════════════════════════════════════════════════
+  // FONCTION : CHARGER LES PHOTOS (VERROUILLÉE)
+  // ═══════════════════════════════════════════════════════════
   const loadPhotos = async () => {
     try {
+      // ✅ Récupérer l'utilisateur connecté pour isolation multi-tenant
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        showError('Utilisateur non authentifié');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('project_photos')
         .select('*')
         .eq('project_id', projectId)
+        .eq('user_id', user.id) // ✅ Filtre obligatoire pour isolation utilisateurs
         .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('Erreur chargement photos:', error);
-        Alert.alert('Erreur', 'Impossible de charger les photos');
+        logger.error('PhotoUploader', 'Erreur chargement photos', error);
+        showError('Impossible de charger les photos');
         return;
       }
       setPhotos(data || []);
     } catch (err) {
-      console.error('Exception chargement photos:', err);
-      Alert.alert('Erreur', 'Erreur lors du chargement des photos');
+      logger.error('PhotoUploader', 'Exception chargement photos', err);
+      showError('Erreur lors du chargement des photos');
     }
   };
 
   useEffect(() => {
-    if (projectId) loadPhotos();
+    if (projectId) {
+      loadPhotos();
+    }
   }, [projectId]);
+
+  // Rafraîchir quand l'écran parent devient visible
+  useEffect(() => {
+    if (isFocused && projectId) {
+      loadPhotos();
+    }
+  }, [isFocused, projectId]);
 
   const pickAndUpload = async () => {
     const { currentClient, currentProject } = useAppStore.getState();
@@ -54,6 +84,28 @@ export default function PhotoUploader({ projectId }) {
       return;
     }
 
+    // ✅ Proposer le choix entre Caméra et Galerie
+    Alert.alert(
+      'Ajouter une photo',
+      'Choisissez la source de la photo',
+      [
+        {
+          text: 'Caméra',
+          onPress: () => pickFromCamera(),
+        },
+        {
+          text: 'Galerie',
+          onPress: () => pickFromGallery(),
+        },
+        {
+          text: 'Annuler',
+          style: 'cancel',
+        },
+      ]
+    );
+  };
+
+  const pickFromCamera = async () => {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
@@ -66,60 +118,150 @@ export default function PhotoUploader({ projectId }) {
         quality: 0.8,
       });
 
-      if (result.canceled) return;
+      if (result.canceled) {return;}
+      
+      await processAndUploadPhoto(result.assets[0].uri);
+    } catch (err) {
+      logger.error('PhotoUploader', 'Erreur capture caméra', err);
+      showError('Erreur lors de la capture');
+    }
+  };
 
+  const pickFromGallery = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission refusée', 'Autorise l\'accès à la galerie');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.8,
+        allowsMultipleSelection: false,
+      });
+
+      if (result.canceled) {return;}
+      
+      await processAndUploadPhoto(result.assets[0].uri);
+    } catch (err) {
+      logger.error('PhotoUploader', 'Erreur sélection galerie', err);
+      showError('Erreur lors de la sélection');
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════
+  // FONCTION : TRAITER ET UPLOADER UNE PHOTO (VERROUILLÉE)
+  // ═══════════════════════════════════════════════════════════
+  // - Compression de l'image
+  // - Capture GPS avec timeout
+  // - Upload vers Supabase Storage
+  // - Insertion en BDD avec géolocalisation
+  // - Reverse geocoding en arrière-plan pour la ville
+  // ═══════════════════════════════════════════════════════════
+  const processAndUploadPhoto = async (originalUri) => {
+    try {
       setUploading(true);
-      const originalUri = result.assets[0].uri;
+      setUploadProgress(0);
       
       // Capturer la date/heure de prise de vue
       const takenAt = new Date().toISOString();
       
-      // Récupérer la position GPS (si permission accordée)
+      // Simuler progress initial (collecte données)
+      setUploadProgress(10);
+      
+      // Récupérer la position GPS (si permission accordée et module disponible)
       let latitude = null;
       let longitude = null;
+      let city = null; // Ville obtenue via reverse geocoding
+      
+      // La géolocalisation est OPTIONNELLE (module natif requis)
+      // L'app fonctionne sans GPS, les photos sont juste sans coordonnées
       try {
-        // Import dynamique pour éviter le crash si le module natif n'est pas disponible
-        const locationModule = await import('expo-location');
-        // Gérer les différents formats d'export (default ou named)
-        const Location = locationModule.default || locationModule;
+        const Location = await import('expo-location').then(mod => mod.default || mod);
         
-        // Vérifier que les fonctions sont disponibles
         if (Location && typeof Location.requestForegroundPermissionsAsync === 'function') {
           const { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
+          
           if (locationStatus === 'granted') {
-            const location = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            latitude = location.coords.latitude;
-            longitude = location.coords.longitude;
+            try {
+              const location = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+                timeout: 10000, // Timeout 10s pour laisser plus de temps
+                maximumAge: 60000, // Accepter une position jusqu'à 1 minute
+              });
+              
+              // Vérifier que les coordonnées sont valides (pas 0,0 et dans des limites raisonnables)
+              if (location?.coords?.latitude && location?.coords?.longitude) {
+                const lat = location.coords.latitude;
+                const lng = location.coords.longitude;
+                
+                // Vérifier que ce n'est pas 0,0 (qui est dans le golfe de Guinée, peu probable)
+                // et que les coordonnées sont dans des limites raisonnables
+                if (lat !== 0 && lng !== 0 && 
+                    lat >= -90 && lat <= 90 && 
+                    lng >= -180 && lng <= 180) {
+                  latitude = lat;
+                  longitude = lng;
+                  logger.info('PhotoUploader', `Géolocalisation capturée: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+                  
+                  // Reverse geocoding sera fait en arrière-plan après l'upload pour ne pas ralentir
+                  // On stocke les coordonnées pour le reverse geocoding asynchrone
+                } else {
+                  logger.warn('PhotoUploader', 'Coordonnées GPS invalides (0,0 ou hors limites)');
+                }
+              }
+            } catch (locationErr) {
+              logger.warn('PhotoUploader', 'Erreur récupération position GPS', locationErr.message);
+              // Continue sans GPS
+            }
+          } else {
+            logger.info('PhotoUploader', 'Permission de géolocalisation non accordée');
           }
-        } else {
-          throw new Error('Module expo-location non disponible - build native requise');
         }
-      } catch (locationErr) {
-        console.warn('[PhotoUploader] Erreur récupération position (module natif peut-être non disponible):', locationErr);
-        // Continue sans géolocalisation si erreur
+      } catch (importErr) {
+        // Module natif non disponible (Expo Go en dev) → normal, continue sans GPS
+        logger.debug('PhotoUploader', 'Module expo-location non disponible (normal en Expo Go)');
       }
       
       // Compression de l'image avant upload
+      setUploadProgress(20);
       const compressed = await compressImage(originalUri);
+      setUploadProgress(40);
       
       const resp = await fetch(compressed.uri);
       const arrayBuffer = await resp.arrayBuffer();
       const bytes = new Uint8Array(arrayBuffer);
+      setUploadProgress(50);
 
       const fileName = `projects/${projectId}/${Date.now()}.jpg`;
+      
+      // Upload avec simulation de progress
+      setUploadProgress(60);
       const { data: uploadData, error: uploadErr } = await supabase.storage
         .from('project-photos')
         .upload(fileName, bytes, { contentType: 'image/jpeg', upsert: false });
+      setUploadProgress(80);
 
-      if (uploadErr) throw uploadErr;
+      if (uploadErr) {throw uploadErr;}
 
       const { data: urlData } = supabase.storage.from('project-photos').getPublicUrl(fileName);
       const publicUrl = urlData.publicUrl;
 
       // Récupérer l'utilisateur connecté pour RLS
       const { data: { user } } = await supabase.auth.getUser();
+
+      // Récupérer currentProject et currentClient depuis le store
+      const { currentProject, currentClient } = useAppStore.getState();
+      
+      if (!currentProject?.id) {
+        throw new Error('Aucun projet sélectionné');
+      }
+      
+      if (!currentClient?.id) {
+        throw new Error('Aucun client sélectionné');
+      }
 
       // Préparer les données avec horodatage et géolocalisation
       const photoData = {
@@ -130,37 +272,90 @@ export default function PhotoUploader({ projectId }) {
         taken_at: takenAt,
       };
 
-      // Ajouter latitude/longitude seulement si disponibles
+      // Ajouter latitude/longitude seulement si disponibles (ville sera ajoutée après)
       if (latitude !== null && longitude !== null) {
         photoData.latitude = latitude;
         photoData.longitude = longitude;
       }
 
-      const { error: insertErr } = await supabase.from('project_photos').insert([photoData]);
+      const { error: insertErr, data: insertedData } = await supabase
+        .from('project_photos')
+        .insert([photoData])
+        .select()
+        .single();
 
-      if (insertErr) throw insertErr;
+      if (insertErr) {throw insertErr;}
 
+      setUploadProgress(95);
       await loadPhotos();
+      setUploadProgress(100);
       showSuccess('Photo envoyée');
+
+      // Reverse geocoding en arrière-plan (ne bloque pas l'upload)
+      if (latitude !== null && longitude !== null && insertedData?.id) {
+        // Faire le reverse geocoding de manière asynchrone sans bloquer
+        (async () => {
+          try {
+            const Location = await import('expo-location').then(mod => mod.default || mod);
+            
+            if (Location?.reverseGeocodeAsync && typeof Location.reverseGeocodeAsync === 'function') {
+              const reverseGeocodeResult = await Location.reverseGeocodeAsync({
+                latitude,
+                longitude,
+              });
+              
+              if (reverseGeocodeResult && reverseGeocodeResult.length > 0) {
+                const address = reverseGeocodeResult[0];
+                // Prioriser city, sinon locality, sinon subLocality
+                const detectedCity = address.city || address.locality || address.subLocality || null;
+                
+                if (detectedCity) {
+                  logger.info('PhotoUploader', `Ville détectée en arrière-plan: ${detectedCity}`);
+                  
+                  // Mettre à jour la photo avec la ville
+                  const { error: updateErr } = await supabase
+                    .from('project_photos')
+                    .update({ city: detectedCity })
+                    .eq('id', insertedData.id);
+                  
+                  if (!updateErr) {
+                    // Recharger les photos pour afficher la ville
+                    await loadPhotos();
+                  } else {
+                    logger.warn('PhotoUploader', 'Erreur mise à jour ville', updateErr);
+                  }
+                }
+              }
+            }
+          } catch (geocodeErr) {
+            // Erreur reverse geocoding → silencieuse, la photo est déjà uploadée
+            logger.debug('PhotoUploader', 'Reverse geocoding échoué en arrière-plan', geocodeErr.message);
+          }
+        })();
+      }
     } catch (err) {
-      console.error('Erreur upload:', err);
+      logger.error('PhotoUploader', 'Erreur upload', err);
       showError('Impossible d\'envoyer la photo');
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   };
 
+  // ═══════════════════════════════════════════════════════════
+  // FONCTION : SUPPRIMER UNE PHOTO (VERROUILLÉE)
+  // ═══════════════════════════════════════════════════════════
   const deletePhoto = async (id, url) => {
     try {
       const path = url.split('/').slice(-3).join('/');
       const { error: storageErr } = await supabase.storage.from('project-photos').remove([path]);
       if (storageErr) {
-        console.error('Erreur suppression storage:', storageErr);
+        logger.error('PhotoUploader', 'Erreur suppression storage', storageErr);
       }
 
       const { error } = await supabase.from('project_photos').delete().eq('id', id);
       if (error) {
-        console.error('Erreur suppression DB:', error);
+        logger.error('PhotoUploader', 'Erreur suppression DB', error);
         showError('Impossible de supprimer la photo');
         return;
       }
@@ -168,19 +363,21 @@ export default function PhotoUploader({ projectId }) {
       await loadPhotos();
       showSuccess('Photo supprimée');
     } catch (err) {
-      console.error('Exception suppression photo:', err);
+      logger.error('PhotoUploader', 'Exception suppression photo', err);
       showError('Erreur lors de la suppression');
     }
   };
 
-  // Gestion de la suppression depuis le viewer avec confirmation et gestion de l'index
+  // ═══════════════════════════════════════════════════════════
+  // FONCTION : CONFIRMER SUPPRESSION DEPUIS VIEWER (VERROUILLÉE)
+  // ═══════════════════════════════════════════════════════════
   const handleConfirmDeleteCurrentPhoto = (currentImageIndex) => {
-    if (viewerImages.length === 0 || photos.length === 0) return;
+    if (viewerImages.length === 0 || photos.length === 0) {return;}
     
     // Utiliser l'index passé en paramètre (depuis FooterComponent) ou viewerIndex en fallback
     const activeIndex = currentImageIndex !== undefined ? currentImageIndex : viewerIndex;
     const currentPhoto = photos[activeIndex];
-    if (!currentPhoto) return;
+    if (!currentPhoto) {return;}
 
     Alert.alert(
       'Confirmer',
@@ -198,10 +395,16 @@ export default function PhotoUploader({ projectId }) {
             await deletePhoto(photoToDelete.id, photoToDelete.url);
 
             // Recharger les photos pour avoir la liste à jour
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+              showError('Utilisateur non authentifié');
+              return;
+            }
             const { data: updatedPhotos } = await supabase
               .from('project_photos')
               .select('*')
               .eq('project_id', projectId)
+              .eq('user_id', user.id) // ✅ Filtre obligatoire pour isolation utilisateurs
               .order('created_at', { ascending: false });
             
             if (updatedPhotos) {
@@ -230,6 +433,9 @@ export default function PhotoUploader({ projectId }) {
     );
   };
 
+  // ═══════════════════════════════════════════════════════════
+  // FONCTIONS : VIEWER PLEIN ÉCRAN (VERROUILLÉES)
+  // ═══════════════════════════════════════════════════════════
   // Transformer les photos en format pour le viewer
   const viewerImages = useMemo(() => {
     return photos.map((photo) => ({
@@ -247,11 +453,6 @@ export default function PhotoUploader({ projectId }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.sectionHeader}>
-        <Feather name="image" size={20} color={theme.colors.accent} />
-        <Text style={styles.title}>Photos du chantier</Text>
-      </View>
-      
       <TouchableOpacity
         style={styles.btn}
         onPress={pickAndUpload}
@@ -259,7 +460,10 @@ export default function PhotoUploader({ projectId }) {
         activeOpacity={0.7}
       >
         {uploading ? (
-          <ActivityIndicator color={theme.colors.text} />
+          <View style={styles.uploadingContainer}>
+            <ActivityIndicator color={theme.colors.text} size="small" />
+            <Text style={styles.uploadingText}>Upload {Math.round(uploadProgress)}%</Text>
+          </View>
         ) : (
           <>
             <Feather name="camera" size={20} color={theme.colors.text} strokeWidth={2.5} />
@@ -268,6 +472,12 @@ export default function PhotoUploader({ projectId }) {
         )}
       </TouchableOpacity>
       
+      {uploading && uploadProgress > 0 && (
+        <View style={styles.progressBarContainer}>
+          <View style={[styles.progressBar, { width: `${uploadProgress}%` }]} />
+        </View>
+      )}
+      
       <FlatList
         data={photos}
         numColumns={3}
@@ -275,7 +485,7 @@ export default function PhotoUploader({ projectId }) {
         renderItem={({ item, index }) => {
           // Formater la date de prise de vue
           const formatPhotoDate = (dateString) => {
-            if (!dateString) return null;
+            if (!dateString) {return null;}
             try {
               const date = new Date(dateString);
               const day = date.getDate().toString().padStart(2, '0');
@@ -290,8 +500,40 @@ export default function PhotoUploader({ projectId }) {
           };
 
           const photoDate = formatPhotoDate(item.taken_at || item.created_at);
-          const hasLocation = item.latitude !== null && item.longitude !== null && 
-                            item.latitude !== undefined && item.longitude !== undefined;
+          
+          // Vérifier que la géolocalisation est valide (fonction robuste)
+          const hasLocation = (() => {
+            // Vérifier que les deux coordonnées existent
+            if (item.latitude == null || item.longitude == null) {
+              return false;
+            }
+            
+            // Convertir en nombre si ce sont des strings
+            const lat = typeof item.latitude === 'string' ? parseFloat(item.latitude) : item.latitude;
+            const lng = typeof item.longitude === 'string' ? parseFloat(item.longitude) : item.longitude;
+            
+            // Vérifier que ce sont des nombres valides
+            if (isNaN(lat) || isNaN(lng)) {
+              return false;
+            }
+            
+            // Vérifier que ce n'est pas 0,0 (coordonnées invalides)
+            if (lat === 0 && lng === 0) {
+              return false;
+            }
+            
+            // Vérifier les limites géographiques
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+              return false;
+            }
+            
+            return true;
+          })();
+          
+          // Debug: logger les coordonnées pour diagnostiquer
+          if (item.latitude != null || item.longitude != null) {
+            logger.debug('PhotoUploader', `Photo ${item.id}: lat=${item.latitude}, lng=${item.longitude}, hasLocation=${hasLocation}`);
+          }
 
           return (
             <View style={styles.photoContainer}>
@@ -309,7 +551,9 @@ export default function PhotoUploader({ projectId }) {
                   {hasLocation && (
                     <View style={styles.locationBadge}>
                       <Feather name="map-pin" size={10} color={theme.colors.accent} />
-                      <Text style={styles.locationText}>géolocalisée</Text>
+                      <Text style={styles.locationText}>
+                        {item.city || 'géolocalisée'}
+                      </Text>
                     </View>
                   )}
                 </View>
@@ -333,7 +577,7 @@ export default function PhotoUploader({ projectId }) {
         presentationStyle="overFullScreen"
         animationType="fade" // Animation d'ouverture/fermeture
         HeaderComponent={({ imageIndex }) => {
-          if (viewerImages.length === 0) return null;
+          if (viewerImages.length === 0) {return null;}
           return (
             <View style={[styles.viewerHeader, { paddingTop: insets.top + theme.spacing.md }]}>
               <View style={styles.viewerHeaderContent}>
@@ -352,7 +596,7 @@ export default function PhotoUploader({ projectId }) {
           );
         }}
         FooterComponent={({ imageIndex }) => {
-          if (viewerImages.length === 0) return null;
+          if (viewerImages.length === 0) {return null;}
           
           return (
             <View style={[styles.viewerFooter, { paddingBottom: insets.bottom + theme.spacing.md }]}>
@@ -398,6 +642,29 @@ const getStyles = (theme) => StyleSheet.create({
     ...theme.typography.body,
     fontWeight: '700',
     color: theme.colors.text,
+  },
+  uploadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  uploadingText: {
+    ...theme.typography.body,
+    fontWeight: '600',
+    color: theme.colors.text,
+    fontSize: 14,
+  },
+  progressBarContainer: {
+    height: 4,
+    backgroundColor: theme.colors.border,
+    borderRadius: theme.borderRadius.sm,
+    marginBottom: theme.spacing.md,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: theme.colors.accent,
+    borderRadius: theme.borderRadius.sm,
   },
   photoContainer: {
     width: PHOTO_SIZE,

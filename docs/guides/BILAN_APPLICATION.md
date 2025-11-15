@@ -796,7 +796,7 @@ const uploadAndSave = async () => {
 // NE PAS COMMITER CETTE CLÉ - AJOUTER .env AU .gitignore
 
 export const OPENAI_CONFIG = {
-  apiKey: 'sk-proj-VOTRE_CLE_ICI', // À remplacer par votre clé API OpenAI
+  apiKey: '[OPENAI_KEY_REDACTED]', // À remplacer par votre clé API OpenAI
   apiUrl: 'https://api.openai.com/v1',
   models: {
     whisper: 'whisper-1',

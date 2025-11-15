@@ -264,11 +264,11 @@ const getStyles = (theme) => StyleSheet.create({
     justifyContent: 'center',
   },
   actionButtonActive: {
-    backgroundColor: theme.colors.accent + '20',
+    backgroundColor: `${theme.colors.accent  }20`,
     borderColor: theme.colors.accent,
   },
   actionButtonDanger: {
-    borderColor: theme.colors.error + '40',
+    borderColor: `${theme.colors.error  }40`,
   },
   filterContainer: {
     flexDirection: 'row',

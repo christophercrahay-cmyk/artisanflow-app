@@ -1,0 +1,79 @@
+═══════════════════════════════════════════════════════════════════
+  🚀 BUILD ARTISANFLOW v1.0.1 - COMMANDE FINALE
+═══════════════════════════════════════════════════════════════════
+
+✅ PROBLÈME RÉSOLU :
+   - Fichier .npmrc créé (legacy-peer-deps)
+   - Node.js 20.18.0 fixé dans eas.json
+   - app.json validé (bundle ID correct)
+
+═══════════════════════════════════════════════════════════════════
+  📱 INFORMATIONS BUILD
+═══════════════════════════════════════════════════════════════════
+
+Application    : ArtisanFlow
+Bundle ID      : com.anonymous.artisanflow
+Version        : 1.0.1
+Version Code   : 2
+Type           : Test fermé (Closed Testing)
+
+═══════════════════════════════════════════════════════════════════
+  🎯 COMMANDE À LANCER
+═══════════════════════════════════════════════════════════════════
+
+npx eas build --platform android --profile production --clear-cache
+
+⏱️  Durée : 15-20 minutes
+📦 Résultat : Fichier .aab pour Play Store
+
+═══════════════════════════════════════════════════════════════════
+  📝 NOTES DE VERSION (copier dans Play Console)
+═══════════════════════════════════════════════════════════════════
+
+- Amélioration de la stabilité générale
+- Correction de l'affichage sur l'écran Capture
+- Optimisation de la transcription IA et génération de devis
+
+═══════════════════════════════════════════════════════════════════
+  📤 APRÈS LE BUILD
+═══════════════════════════════════════════════════════════════════
+
+1. Télécharger l'AAB :
+   https://expo.dev/accounts/chriskreepz/projects/artisanflow-3rgvrambzo0tk8d1ddx2/builds
+
+2. Upload sur Play Console :
+   https://play.google.com/console
+   → ArtisanFlow → Test → Test fermé → Créer une version
+
+3. Copier les notes de version ci-dessus
+
+4. Déployer en test fermé
+
+5. Attendre validation Google (1-3 jours)
+
+═══════════════════════════════════════════════════════════════════
+  ✅ FICHIERS CRÉÉS
+═══════════════════════════════════════════════════════════════════
+
+Configuration :
+  - .npmrc (force legacy-peer-deps)
+  - eas.json (Node 20.18.0)
+  - app.json (bundle ID corrigé)
+
+Documentation :
+  - FIX_EAS_BUILD_ERROR.md
+  - BUILD_PLAY_STORE_READY.md
+  - COMMANDES_BUILD_PLAY_STORE.md
+  - PUBLICATION_PLAY_STORE.txt
+  - BUILD_FINAL.txt (ce fichier)
+
+═══════════════════════════════════════════════════════════════════
+  🎊 PRÊT À BUILDER !
+═══════════════════════════════════════════════════════════════════
+
+Lance la commande :
+
+npx eas build --platform android --profile production --clear-cache
+
+═══════════════════════════════════════════════════════════════════
+

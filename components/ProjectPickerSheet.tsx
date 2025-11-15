@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeTheme } from '../theme/useSafeTheme';
 import { Project } from '../types';
 import { showError } from '../components/Toast';
+import { getLastProject, saveLastProject } from '../utils/lastProjectStorage';
 
 interface ProjectWithClient extends Project {
   clients?: { name: string } | null;
@@ -40,33 +41,80 @@ export default function ProjectPickerSheet({
   const theme = useSafeTheme();
   const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
+  const [lastProjectId, setLastProjectId] = useState<string | null>(null);
   const styles = getStyles(theme, insets);
 
+  // Charger le dernier chantier sélectionné au montage
+  useEffect(() => {
+    getLastProject().then(setLastProjectId);
+  }, []);
+
   const filteredProjects = useMemo(() => {
-    if (!searchQuery.trim()) {
-      // Trier par statut (actifs en premier)
-      return [...projects].sort((a, b) => {
-        if (a.status === 'active' && b.status !== 'active') return -1;
-        if (a.status !== 'active' && b.status === 'active') return 1;
-        return 0;
-      });
+    // Fonction pour déterminer si un projet est actif
+    const isActive = (status: string | undefined) => {
+      return status === 'active' || status === 'in_progress' || !status;
+    };
+
+    let filtered = projects;
+    
+    // Appliquer la recherche si nécessaire
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = projects.filter(
+        (p) =>
+          p.name.toLowerCase().includes(query) ||
+          p.clients?.name?.toLowerCase().includes(query) ||
+          p.address?.toLowerCase().includes(query)
+      );
     }
 
-    const query = searchQuery.toLowerCase();
-    return projects.filter(
-      (p) =>
-        p.name.toLowerCase().includes(query) ||
-        p.clients?.name?.toLowerCase().includes(query) ||
-        p.address?.toLowerCase().includes(query)
-    );
-  }, [projects, searchQuery]);
+    // Trier avec priorité au dernier chantier utilisé
+    return [...filtered].sort((a, b) => {
+      // Priorité 1 : Dernier chantier sélectionné en premier
+      if (lastProjectId) {
+        if (a.id === lastProjectId) return -1;
+        if (b.id === lastProjectId) return 1;
+      }
 
-  const handleSelect = (project: ProjectWithClient) => {
+      // Priorité 2 : Statut (actifs en premier)
+      const aActive = isActive(a.status);
+      const bActive = isActive(b.status);
+      
+      if (aActive && !bActive) return -1;
+      if (!aActive && bActive) return 1;
+      
+      // Priorité 3 : Date (plus récent en premier)
+      const aDate = new Date(a.created_at || 0).getTime();
+      const bDate = new Date(b.created_at || 0).getTime();
+      return bDate - aDate;
+    });
+  }, [projects, searchQuery, lastProjectId]);
+
+  const handleSelect = async (project: ProjectWithClient) => {
     if (projects.length === 0) {
       showError('Aucun chantier trouvé. Créez-en un d\'abord.');
       return;
     }
+    
+    // Sauvegarder comme dernier chantier utilisé
+    await saveLastProject(project.id);
+    setLastProjectId(project.id);
+    
     onSelectProject(project);
+  };
+
+  const getStatusEmoji = (status: string | undefined) => {
+    if (status === 'in_progress' || status === 'active' || !status) return '🟢'; // Actif
+    if (status === 'planned') return '🟠'; // En attente
+    if (status === 'done') return '⚪'; // Terminé
+    return '🔵'; // Autre
+  };
+
+  const getStatusLabel = (status: string | undefined) => {
+    if (status === 'in_progress' || status === 'active' || !status) return 'Actif';
+    if (status === 'planned') return 'En attente';
+    if (status === 'done') return 'Terminé';
+    return 'Autre';
   };
 
   return (
@@ -78,6 +126,7 @@ export default function ProjectPickerSheet({
     >
       <View style={styles.overlay}>
         <View style={styles.container}>
+          {/* 📂 Titre avec icône */}
           <View style={styles.header}>
             <TouchableOpacity
               onPress={onClose}
@@ -87,6 +136,7 @@ export default function ProjectPickerSheet({
             >
               <Feather name="arrow-left" size={20} color={theme.colors.accent} strokeWidth={2.5} />
             </TouchableOpacity>
+            <Text style={styles.titleIcon}>📂</Text>
             <Text style={styles.title}>Sélectionner un chantier</Text>
           </View>
 
@@ -130,22 +180,29 @@ export default function ProjectPickerSheet({
                       activeOpacity={0.7}
                       disabled={loading}
                     >
+                      <View style={styles.projectIconContainer}>
+                        <Text style={styles.projectIcon}>
+                          {item.id === lastProjectId ? '⭐' : '📁'}
+                        </Text>
+                      </View>
                       <View style={styles.projectContent}>
                         <View style={styles.projectHeader}>
-                          <Feather
-                            name={item.status === 'active' ? 'folder' : 'folder-check'}
-                            size={20}
-                            color={item.status === 'active' ? theme.colors.accent : theme.colors.textSecondary}
-                            strokeWidth={2}
-                          />
                           <Text style={styles.projectName}>{item.name}</Text>
+                          {item.id === lastProjectId && (
+                            <Text style={styles.lastUsedBadge}>Dernier utilisé</Text>
+                          )}
                         </View>
-                        {item.clients?.name && (
-                          <Text style={styles.clientName}>Client: {item.clients.name}</Text>
-                        )}
+                        <View style={styles.projectMeta}>
+                          {item.clients?.name && (
+                            <Text style={styles.clientName}>{item.clients.name}</Text>
+                          )}
+                          <Text style={styles.statusBadge}>
+                            {getStatusEmoji(item.status)} {getStatusLabel(item.status)}
+                          </Text>
+                        </View>
                         {item.address && (
                           <Text style={styles.projectAddress} numberOfLines={1}>
-                            {item.address}
+                            📍 {item.address}
                           </Text>
                         )}
                       </View>
@@ -154,6 +211,16 @@ export default function ProjectPickerSheet({
                   )}
                   style={styles.list}
                   contentContainerStyle={styles.listContent}
+                  ListFooterComponent={
+                    <TouchableOpacity
+                      style={styles.createButton}
+                      onPress={onClose}
+                      activeOpacity={0.7}
+                    >
+                      <Feather name="plus" size={20} color={theme.colors.accent} strokeWidth={2.5} />
+                      <Text style={styles.createButtonText}>Créer un nouveau chantier</Text>
+                    </TouchableOpacity>
+                  }
                 />
               )}
             </>
@@ -187,6 +254,10 @@ const getStyles = (theme: any, insets: any) => StyleSheet.create({
   backButton: {
     marginRight: theme.spacing.md,
   },
+  titleIcon: {
+    fontSize: 24,
+    marginRight: theme.spacing.xs,
+  },
   title: {
     ...theme.typography.h3,
     fontSize: 20,
@@ -214,12 +285,24 @@ const getStyles = (theme: any, insets: any) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: theme.colors.surfaceElevated,
+    backgroundColor: '#111827', // Fond gris anthracite
     padding: theme.spacing.md,
     borderRadius: theme.borderRadius.md,
     marginBottom: theme.spacing.sm,
     borderWidth: 1,
     borderColor: theme.colors.border,
+  },
+  projectIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: theme.colors.accent + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.md,
+  },
+  projectIcon: {
+    fontSize: 24,
   },
   projectContent: {
     flex: 1,
@@ -228,24 +311,63 @@ const getStyles = (theme: any, insets: any) => StyleSheet.create({
   projectHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing.sm,
     marginBottom: theme.spacing.xs,
   },
   projectName: {
     ...theme.typography.body,
     fontWeight: '600',
-    color: theme.colors.text,
+    color: theme.colors.text, // Blanc pur
     fontSize: 16,
+  },
+  lastUsedBadge: {
+    ...theme.typography.bodySmall,
+    fontSize: 11,
+    color: theme.colors.warning,
+    backgroundColor: theme.colors.warning + '15',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: theme.spacing.xs,
+  },
+  projectMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
   },
   clientName: {
     ...theme.typography.bodySmall,
     color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.xs / 2,
+    fontSize: 13,
+  },
+  statusBadge: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textSecondary,
+    fontSize: 12,
   },
   projectAddress: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
     fontSize: 12,
+  },
+  createButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.sm,
+    backgroundColor: theme.colors.accent + '15', // Bleu clair sur fond sombre
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginTop: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.accent + '30',
+  },
+  createButtonText: {
+    ...theme.typography.body,
+    fontWeight: '600',
+    color: theme.colors.accent, // Bleu #3B82F6
+    fontSize: 16,
   },
   emptyContainer: {
     alignItems: 'center',

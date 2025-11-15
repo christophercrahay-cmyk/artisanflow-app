@@ -24,17 +24,26 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const styles = useMemo(() => getStyles(theme), [theme]);
 
   const handleAuth = async () => {
+    // Validation
     if (!email.trim() || !password.trim()) {
       Alert.alert('Champs requis', 'Remplissez tous les champs');
       return;
     }
 
+    // Validation email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      Alert.alert('Email invalide', 'Veuillez entrer une adresse email valide');
+      return;
+    }
+
     if (password.length < 6) {
-      Alert.alert('Mot de passe trop court', 'Minimum 6 caractères');
+      Alert.alert('Mot de passe trop court', 'Le mot de passe doit contenir au moins 6 caractères');
       return;
     }
 
@@ -42,21 +51,83 @@ export default function AuthScreen() {
       setLoading(true);
 
       if (isSignUp) {
-        const { user, session } = await signUp(email.trim(), password);
+        // Inscription : workflow propre
+        const { user, session, error } = await signUp(email.trim(), password);
+        
+        if (error) {
+          // Gestion des erreurs spécifiques
+          if (error.message.includes('already registered') || error.message.includes('User already registered')) {
+            Alert.alert(
+              'Compte existant',
+              'Cet email est déjà utilisé. Essayez de vous connecter.',
+              [
+                { text: 'OK', onPress: () => setIsSignUp(false) }
+              ]
+            );
+            return;
+          }
+          throw error;
+        }
+
         if (user && !session) {
-          Alert.alert('Vérifiez votre email', 'Un lien de confirmation a été envoyé');
+          // Email de confirmation requis
+          Alert.alert(
+            '📧 Vérifiez votre email',
+            `Un lien de confirmation a été envoyé à ${  email.trim()  }.\n\nCliquez sur le lien pour confirmer votre compte, puis reconnectez-vous.`,
+            [{ text: 'OK' }]
+          );
         } else if (session) {
-          Alert.alert('✅ Compte créé', 'Vous êtes connecté !');
+          // Auto-confirm activé, connexion directe
+          Alert.alert('✅ Compte créé', 'Bienvenue sur ArtisanFlow !');
+          // La session sera détectée automatiquement par App.js
         }
       } else {
-        await signIn(email.trim(), password);
-        Alert.alert('✅ Connecté', 'Bienvenue !');
+        // Connexion : simple et directe
+        const { error } = await signIn(email.trim(), password);
+        
+        if (error) {
+          // Gestion des erreurs spécifiques
+          if (error.message.includes('Email not confirmed')) {
+            Alert.alert(
+              'Email non confirmé',
+              'Veuillez confirmer votre email avant de vous connecter.\n\nVérifiez votre boîte de réception.',
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+          
+          if (error.message.includes('Invalid login credentials') || error.message.includes('invalid_credentials')) {
+            Alert.alert(
+              'Identifiants incorrects',
+              'L\'email ou le mot de passe est incorrect.\n\nVérifiez vos identifiants ou créez un compte.',
+              [
+                { text: 'OK' },
+                { text: 'Créer un compte', onPress: () => setIsSignUp(true), style: 'default' }
+              ]
+            );
+            return;
+          }
+          
+          throw error;
+        }
+        
+        // Connexion réussie - pas besoin d'alert, la session sera détectée automatiquement
+        // La navigation se fera automatiquement via App.js qui détecte la session
       }
       
-      // La session sera détectée par le guard global
     } catch (err) {
-      console.error('Erreur auth:', err);
-      Alert.alert('Erreur', err.message || 'Opération impossible');
+      logger.error('AuthScreen', 'Erreur auth', err);
+      
+      // Messages d'erreur plus clairs
+      let errorMessage = err.message || 'Une erreur est survenue';
+      
+      if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+        errorMessage = 'Problème de connexion. Vérifiez votre connexion internet.';
+      } else if (errorMessage.includes('timeout')) {
+        errorMessage = 'La connexion a expiré. Réessayez.';
+      }
+      
+      Alert.alert('Erreur', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -108,9 +179,20 @@ export default function AuthScreen() {
                 placeholderTextColor={theme.colors.textMuted}
                 value={password}
                 onChangeText={setPassword}
-                secureTextEntry
+                secureTextEntry={!showPassword}
                 autoCapitalize="none"
               />
+              <TouchableOpacity
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeButton}
+                activeOpacity={0.7}
+              >
+                <Feather
+                  name={showPassword ? 'eye-off' : 'eye'}
+                  size={20}
+                  color={theme.colors.textSecondary}
+                />
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity
@@ -224,6 +306,9 @@ const getStyles = (theme) => StyleSheet.create({
   switchButtonText: {
     ...theme.typography.bodySecondary,
     color: theme.colors.accentLight,
+  },
+  eyeButton: {
+    padding: theme.spacing.xs,
   },
 });
 

@@ -1,153 +1,183 @@
-# ArtisanFlow - Application de Gestion pour Artisans
+# Supabase CLI
 
-Application React Native Expo pour gérer clients, chantiers, photos et notes vocales avec transcription.
+[![Coverage Status](https://coveralls.io/repos/github/supabase/cli/badge.svg?branch=main)](https://coveralls.io/github/supabase/cli?branch=main) [![Bitbucket Pipelines](https://img.shields.io/bitbucket/pipelines/supabase-cli/setup-cli/master?style=flat-square&label=Bitbucket%20Canary)](https://bitbucket.org/supabase-cli/setup-cli/pipelines) [![Gitlab Pipeline Status](https://img.shields.io/gitlab/pipeline-status/sweatybridge%2Fsetup-cli?label=Gitlab%20Canary)
+](https://gitlab.com/sweatybridge/setup-cli/-/pipelines)
 
-## 🚀 Installation Rapide
+[Supabase](https://supabase.io) is an open source Firebase alternative. We're building the features of Firebase using enterprise-grade open source tools.
 
-### 1. Installer les dépendances
-```bash
-npm install
-```
+This repository contains all the functionality for Supabase CLI.
 
-### 2. Configurer Supabase
+- [x] Running Supabase locally
+- [x] Managing database migrations
+- [x] Creating and deploying Supabase Functions
+- [x] Generating types directly from your database schema
+- [x] Making authenticated HTTP requests to [Management API](https://supabase.com/docs/reference/api/introduction)
 
-**IMPORTANT**: Exécutez le script SQL dans Supabase avant de lancer l'app !
+## Getting started
 
-1. Ouvrez votre projet Supabase
-2. Allez dans **SQL Editor**
-3. Exécutez le fichier `create_tables.sql` (copier/coller tout le contenu)
-4. Vérifiez que toutes les tables sont créées
+### Install the CLI
 
-Tables créées :
-- `clients` - Informations clients
-- `projects` - Chantiers/projets
-- `client_photos` - Photos par client
-- `project_photos` - Photos par chantier
-- `notes` - Notes vocales avec transcriptions
-- `devis` - Devis avec numérotation automatique
-- `factures` - Factures avec lien devis
-
-### 3. Lancer l'application
+Available via [NPM](https://www.npmjs.com) as dev dependency. To install:
 
 ```bash
-# Démarrer avec cache propre
-npx expo start -c
+npm i supabase --save-dev
 ```
 
-Scannez le QR code avec **Expo Go** sur votre téléphone.
-
-## 📱 Fonctionnalités
-
-### ✅ Implémenté
-
-- **Clients**: Ajout, consultation, photos
-- **Chantiers**: Ajout, consultation, photos, statuts (actif/pause/terminé)
-- **Notes vocales**: Enregistrement, upload, transcription locale (Whisper)
-- **Photos**: Capture caméra, galerie, suppression (clients + chantiers)
-- **Devis**: Création, modification, statuts (brouillon/envoyé/accepté/refusé), transcription vocale
-- **Factures**: Création, modification, statuts (brouillon/envoyé/payé/impayée), transcription vocale
-- **Navigation**: Stack navigation avec écrans détail
-- **Édition transcriptions**: Modification manuelle des transcriptions
-- **Numérotation automatique**: DE-YYYY-XXXX (devis), FA-YYYY-XXXX (factures)
-- **Calcul automatique**: HT → TTC avec TVA personnalisable
-
-## 🛠️ Technologies
-
-- **React Native** (Expo SDK 54)
-- **Supabase** (Backend + Storage)
-- **Whisper.rn** (Transcription vocale locale)
-- **React Navigation** (Native Stack)
-- **Expo Image Picker** (Caméra)
-- **Expo AV** (Enregistrement audio)
-
-## 📝 Configuration
-
-### Supabase Client
-
-Le fichier `supabaseClient.js` contient la configuration de connexion.
-
-**Note**: Pour la production, ajoutez l'authentification utilisateur.
-
-### Whisper.rn
-
-- **Mode Expo Go**: Transcription désactivée (module natif)
-- **Mode Build natif**: Transcription activée automatiquement
-- **Modèle**: `ggml-tiny.en.bin` (anglais, téléchargement automatique)
-
-## 🏗️ Build Production
-
-### EAS Build (Recommandé)
+To install the beta release channel:
 
 ```bash
-# Login EAS
-eas login
-
-# Build Android
-eas build --platform android --profile production
+npm i supabase@beta --save-dev
 ```
 
-Configuration EAS dans `eas.json`.
-
-## 📂 Structure
+When installing with yarn 4, you need to disable experimental fetch with the following nodejs config.
 
 ```
-artisanflow/
-├── App.js                    # Navigation principale + écrans
-├── VoiceRecorder.js          # Notes vocales + Whisper
-├── PhotoUploader.js          # Photos chantiers
-├── PhotoUploaderClient.js    # Photos clients
-├── DevisFactures.js          # Devis + Factures
-├── supabaseClient.js         # Configuration Supabase
-├── INIT_SUPABASE.sql         # Script complet Supabase
-├── QUICK_START.md            # Guide démarrage rapide
-├── SUPABASE_SETUP.md         # Documentation setup
-├── PROBLEMES_COMMUNS.md      # Troubleshooting
-├── README.md                 # Documentation principale
-├── app.json                  # Config Expo
-├── eas.json                  # Config EAS Build
-├── package.json              # Dépendances
-├── kill-port-8081.ps1        # Script libération port 8081
-├── start-dev.ps1             # Démarrage Expo sécurisé
-└── install-artisanflow.ps1   # Installation APK Android
+NODE_OPTIONS=--no-experimental-fetch yarn add supabase
 ```
 
-## 🐛 Troubleshooting
+> **Note**
+For Bun versions below v1.0.17, you must add `supabase` as a [trusted dependency](https://bun.sh/guides/install/trusted) before running `bun add -D supabase`.
 
-### Erreur RLS (Row Level Security)
+<details>
+  <summary><b>macOS</b></summary>
 
-Si vous voyez `new row violates row-level security policy` :
+  Available via [Homebrew](https://brew.sh). To install:
 
-1. Exécutez `INIT_SUPABASE.sql` dans Supabase
-2. RLS est automatiquement désactivé par le script
+  ```sh
+  brew install supabase/tap/supabase
+  ```
 
-### Erreur "Whisper indisponible"
+  To install the beta release channel:
+  
+  ```sh
+  brew install supabase/tap/supabase-beta
+  brew link --overwrite supabase-beta
+  ```
+  
+  To upgrade:
 
-Normal en Expo Go. Les transcriptions ne fonctionnent que dans un build natif.
+  ```sh
+  brew upgrade supabase
+  ```
+</details>
 
-### Port 8081 occupé
+<details>
+  <summary><b>Windows</b></summary>
 
-**Solution rapide :**
+  Available via [Scoop](https://scoop.sh). To install:
+
+  ```powershell
+  scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
+  scoop install supabase
+  ```
+
+  To upgrade:
+
+  ```powershell
+  scoop update supabase
+  ```
+</details>
+
+<details>
+  <summary><b>Linux</b></summary>
+
+  Available via [Homebrew](https://brew.sh) and Linux packages.
+
+  #### via Homebrew
+
+  To install:
+
+  ```sh
+  brew install supabase/tap/supabase
+  ```
+
+  To upgrade:
+
+  ```sh
+  brew upgrade supabase
+  ```
+
+  #### via Linux packages
+
+  Linux packages are provided in [Releases](https://github.com/supabase/cli/releases). To install, download the `.apk`/`.deb`/`.rpm`/`.pkg.tar.zst` file depending on your package manager and run the respective commands.
+
+  ```sh
+  sudo apk add --allow-untrusted <...>.apk
+  ```
+
+  ```sh
+  sudo dpkg -i <...>.deb
+  ```
+
+  ```sh
+  sudo rpm -i <...>.rpm
+  ```
+
+  ```sh
+  sudo pacman -U <...>.pkg.tar.zst
+  ```
+</details>
+
+<details>
+  <summary><b>Other Platforms</b></summary>
+
+  You can also install the CLI via [go modules](https://go.dev/ref/mod#go-install) without the help of package managers.
+
+  ```sh
+  go install github.com/supabase/cli@latest
+  ```
+
+  Add a symlink to the binary in `$PATH` for easier access:
+
+  ```sh
+  ln -s "$(go env GOPATH)/bin/cli" /usr/bin/supabase
+  ```
+
+  This works on other non-standard Linux distros.
+</details>
+
+<details>
+  <summary><b>Community Maintained Packages</b></summary>
+
+  Available via [pkgx](https://pkgx.sh/). Package script [here](https://github.com/pkgxdev/pantry/blob/main/projects/supabase.com/cli/package.yml).
+  To install in your working directory:
+
+  ```bash
+  pkgx install supabase
+  ```
+
+  Available via [Nixpkgs](https://nixos.org/). Package script [here](https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/tools/supabase-cli/default.nix).
+</details>
+
+### Run the CLI
+
 ```bash
-npm run kill:port
-npm start
+supabase bootstrap
 ```
 
-**Alternative :** Utiliser le script automatique :
+Or using npx:
+
 ```bash
-npm run start:safe
+npx supabase bootstrap
 ```
 
-**Scripts PowerShell disponibles :**
-- `kill-port-8081.ps1` : Libère le port 8081
-- `start-dev.ps1` : Libère le port 8081 puis démarre Expo
+The bootstrap command will guide you through the process of setting up a Supabase project using one of the [starter](https://github.com/supabase-community/supabase-samples/blob/main/samples.json) templates.
 
-Si ces solutions ne fonctionnent pas, Expo proposera automatiquement le port 8082.
+## Docs
 
-## 📄 Licence
+Command & config reference can be found [here](https://supabase.com/docs/reference/cli/about).
 
-Private - ArtisanFlow
+## Breaking changes
 
-## 👤 Auteur
+We follow semantic versioning for changes that directly impact CLI commands, flags, and configurations.
 
-MVP Artisan
+However, due to dependencies on other service images, we cannot guarantee that schema migrations, seed.sql, and generated types will always work for the same CLI major version. If you need such guarantees, we encourage you to pin a specific version of CLI in package.json.
 
+## Developing
+
+To run from source:
+
+```sh
+# Go >= 1.22
+go run . help
+```

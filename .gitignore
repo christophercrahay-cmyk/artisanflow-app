@@ -2,6 +2,8 @@ node_modules/
 .expo/
 .eas/
 backup/
+android/
+ios/
 .DS_Store
 *.log
 npm-debug.log*
@@ -19,7 +21,7 @@ yarn-error.log*
 *.aab
 *.apk
 
-# Configuration files with secrets
-config/openai.js
-config/supabase.js
-config/sentry.js
+# Configuration files with secrets (commenté pour permettre le build EAS)
+# config/openai.js
+# config/supabase.js
+# config/sentry.js

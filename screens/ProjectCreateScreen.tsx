@@ -19,6 +19,7 @@ import { PendingCapture } from '../types/capture';
 import { Client } from '../types';
 import { useAttachCaptureToProject } from '../hooks/useAttachCaptureToProject';
 import logger from '../utils/logger';
+import { requireProOrPaywall } from '../utils/proAccess';
 
 interface ProjectCreateRouteParams {
   initialCapture?: PendingCapture;
@@ -49,19 +50,26 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
   const [clients, setClients] = useState<Client[]>([]);
   const [creating, setCreating] = useState(false);
   const [loadingClients, setLoadingClients] = useState(true);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
   const styles = getStyles(theme, insets);
 
   useEffect(() => {
+    // ✅ S'assurer que le formulaire démarre vide (pas de projet en cache)
+    logger.info('ProjectCreate', 'Écran monté - formulaire vide');
     loadClients();
   }, []);
 
   const loadClients = async () => {
     try {
       setLoadingClients(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const { data, error } = await supabase
         .from('clients')
         .select('*')
+        .eq('user_id', user.id)
         .order('name', { ascending: true });
 
       if (error) {
@@ -70,7 +78,45 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
         return;
       }
 
-      setClients(data || []);
+      const clientsList = data || [];
+      setClients(clientsList);
+
+      // Si aucun client n'existe, afficher un message et empêcher la création
+      if (clientsList.length === 0) {
+        logger.warn('ProjectCreate', 'Aucun client trouvé');
+        // Ne pas bloquer l'UI, mais afficher un message dans le formulaire
+      } else if (!selectedClientId && initialClientId) {
+        // Si un clientId initial est fourni, vérifier qu'il existe
+        const clientExists = clientsList.find(c => c.id === initialClientId);
+        if (clientExists) {
+          setSelectedClientId(initialClientId);
+          setSelectedClient(clientExists);
+          // Pré-remplir le nom et l'adresse
+          setProjectName(`Chantier - ${clientExists.name}`);
+          if (clientExists.address) {
+            setProjectAddress(clientExists.address);
+          }
+        } else {
+          // Si le client initial n'existe plus, sélectionner le premier
+          const firstClient = clientsList[0];
+          setSelectedClientId(firstClient.id);
+          setSelectedClient(firstClient);
+          setProjectName(`Chantier - ${firstClient.name}`);
+          if (firstClient.address) {
+            setProjectAddress(firstClient.address);
+          }
+        }
+      } else if (!selectedClientId && clientsList.length > 0) {
+        // Sélectionner le premier client par défaut
+        const firstClient = clientsList[0];
+        setSelectedClientId(firstClient.id);
+        setSelectedClient(firstClient);
+        // Pré-remplir le nom et l'adresse
+        setProjectName(`Chantier - ${firstClient.name}`);
+        if (firstClient.address) {
+          setProjectAddress(firstClient.address);
+        }
+      }
     } catch (err) {
       logger.error('ProjectCreate', 'Exception chargement clients', err);
     } finally {
@@ -79,6 +125,15 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
   };
 
   const handleCreateProject = async () => {
+    // Vérifier l'accès Pro
+    const ok = await requireProOrPaywall(navigation, 'Création projet');
+    if (!ok) return;
+
+    if (clients.length === 0) {
+      showError('Créez d\'abord un client avant de créer un chantier');
+      return;
+    }
+
     if (!projectName.trim()) {
       showError('Le nom du chantier est obligatoire');
       return;
@@ -135,7 +190,11 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
 
       showSuccess(`Chantier "${projectName}" créé avec succès`);
 
-      // Navigation : retourner au détail du nouveau projet
+      // ✅ Nettoyer le formulaire
+      setProjectName('');
+      setProjectAddress('');
+      
+      // Navigation : remplacer l'écran actuel par le détail du nouveau projet (vide, 0 photo, 0 note)
       if (newProject) {
         navigation.replace('ProjectDetail', { projectId: newProject.id });
       } else {
@@ -186,12 +245,41 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
               <Text style={styles.label}>Client *</Text>
               {loadingClients ? (
                 <ActivityIndicator size="small" color={theme.colors.accent} />
+              ) : clients.length === 0 ? (
+                <View style={styles.noClientsContainer}>
+                  <Feather name="alert-circle" size={20} color={theme.colors.error || '#EF4444'} />
+                  <Text style={styles.noClientsText}>
+                    Aucun client disponible. Créez d'abord un client avant de créer un chantier.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.createClientButton}
+                    onPress={() => {
+                      // ✅ FIX : Retour simple à l'écran précédent
+                      // L'utilisateur peut créer un client depuis l'onglet Clients
+                      navigation.goBack();
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Feather name="user-plus" size={16} color={theme.colors.text} />
+                    <Text style={styles.createClientButtonText}>Créer un client</Text>
+                  </TouchableOpacity>
+                </View>
               ) : (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.clientScroll}>
                   {clients.map((client) => (
                     <TouchableOpacity
                       key={client.id}
-                      onPress={() => setSelectedClientId(client.id)}
+                      onPress={() => {
+                        setSelectedClientId(client.id);
+                        setSelectedClient(client);
+                        // Pré-remplir le nom et l'adresse quand on change de client
+                        setProjectName(`Chantier - ${client.name}`);
+                        if (client.address) {
+                          setProjectAddress(client.address);
+                        } else {
+                          setProjectAddress('');
+                        }
+                      }}
                       style={[
                         styles.clientChip,
                         selectedClientId === client.id && styles.clientChipSelected,
@@ -244,10 +332,10 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
             {/* Bouton créer */}
             <TouchableOpacity
               onPress={handleCreateProject}
-              disabled={creating || !projectName.trim() || !selectedClientId}
+              disabled={creating || !projectName.trim() || !selectedClientId || clients.length === 0}
               style={[
                 styles.createButton,
-                (creating || !projectName.trim() || !selectedClientId) && styles.createButtonDisabled,
+                (creating || !projectName.trim() || !selectedClientId || clients.length === 0) && styles.createButtonDisabled,
               ]}
               activeOpacity={0.8}
             >
@@ -372,6 +460,37 @@ const getStyles = (theme: any, insets: any) => StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.text,
     fontSize: 16,
+  },
+  noClientsContainer: {
+    backgroundColor: theme.colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.lg,
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  noClientsText: {
+    ...theme.typography.body,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  createClientButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.borderRadius.md,
+    marginTop: theme.spacing.xs,
+  },
+  createClientButtonText: {
+    ...theme.typography.body,
+    fontWeight: '600',
+    color: theme.colors.text,
+    fontSize: 14,
   },
 });
 

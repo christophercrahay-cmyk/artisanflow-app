@@ -1,3 +1,14 @@
+/**
+ * ⚠️⚠️⚠️ FICHIER BACKUP - NE PAS UTILISER EN PRODUCTION ⚠️⚠️⚠️
+ * 
+ * Ce fichier contient des failles de sécurité multi-tenant :
+ * - Requêtes Supabase SANS filtre user_id (lignes 154-157, 169-172)
+ * - Affiche les données de TOUS les utilisateurs
+ * 
+ * ❌ NE PAS réutiliser ce code
+ * ✅ Utiliser les écrans dans /screens/ à la place
+ */
+
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -26,7 +37,7 @@ function ClientsScreen() {
       .from('clients')
       .select('id,name,phone,email,created_at')
       .order('created_at', { ascending: false });
-    if (!error) setClients(data || []);
+    if (!error) {setClients(data || []);}
   };
 
   useEffect(() => {
@@ -46,7 +57,7 @@ function ClientsScreen() {
           email: email.trim() || null,
         },
       ]);
-      if (error) throw error;
+      if (error) {throw error;}
       setName('');
       setPhone('');
       setEmail('');
@@ -67,7 +78,7 @@ function ClientsScreen() {
         style: 'destructive',
         onPress: async () => {
           const { error } = await supabase.from('clients').delete().eq('id', id);
-          if (!error) loadClients();
+          if (!error) {loadClients();}
         },
       },
     ]);
@@ -148,23 +159,29 @@ function ProjectsScreen() {
   const [loading, setLoading] = useState(false);
 
   const loadClients = async () => {
+    // ⚠️ FAILLE SÉCURITÉ : Ce fichier backup n'est PAS sécurisé multi-tenant
+    // ❌ NE PAS RÉUTILISER CE CODE - manque filtre .eq('user_id', ...)
+    // ✅ Utiliser ClientsListScreen2.js à la place
     const { data, error } = await supabase
       .from('clients')
       .select('id,name')
       .order('name', { ascending: true });
     if (!error) {
       setClientsOptions(data || []);
-      if (!clientId && data && data.length) setClientId(data[0].id);
+      if (!clientId && data && data.length) {setClientId(data[0].id);}
     }
   };
 
-  // Récupère TOUTES les colonnes + nom client → évite l’erreur status/status_text
+  // Récupère TOUTES les colonnes + nom client → évite l'erreur status/status_text
   const loadProjects = async () => {
+    // ⚠️ FAILLE SÉCURITÉ : Ce fichier backup n'est PAS sécurisé multi-tenant
+    // ❌ NE PAS RÉUTILISER CE CODE - manque filtre .eq('user_id', ...)
+    // ✅ Utiliser ProjectsListScreen.js à la place
     const { data, error } = await supabase
       .from('projects')
       .select('*, clients(name)')
       .order('created_at', { ascending: false });
-    if (!error) setProjects(data || []);
+    if (!error) {setProjects(data || []);}
   };
 
   useEffect(() => {
@@ -176,8 +193,8 @@ function ProjectsScreen() {
 
   const addProject = async () => {
     if (!projectName.trim())
-      return Alert.alert('Nom requis', 'Le nom du chantier est obligatoire.');
-    if (!clientId) return Alert.alert('Client requis', 'Sélectionne un client.');
+      {return Alert.alert('Nom requis', 'Le nom du chantier est obligatoire.');}
+    if (!clientId) {return Alert.alert('Client requis', 'Sélectionne un client.');}
 
     try {
       setLoading(true);
@@ -205,7 +222,7 @@ function ProjectsScreen() {
         error = retry.error;
       }
 
-      if (error) throw error;
+      if (error) {throw error;}
 
       setProjectName('');
       setAddress('');
@@ -226,7 +243,7 @@ function ProjectsScreen() {
         style: 'destructive',
         onPress: async () => {
           const { error } = await supabase.from('projects').delete().eq('id', id);
-          if (!error) loadProjects();
+          if (!error) {loadProjects();}
         },
       },
     ]);

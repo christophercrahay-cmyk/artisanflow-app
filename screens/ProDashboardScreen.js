@@ -29,11 +29,16 @@ export default function ProDashboardScreen({ navigation }) {
     try {
       setLoading(true);
 
+      // Récupérer l'utilisateur connecté
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       // 1. Devis en attente (statut = 'envoye')
       const { data: devisData, error: devisErr } = await supabase
         .from('devis')
-        .select('id', { count: 'exact' })
-        .eq('statut', 'envoye');
+        .select('id, projects!inner(user_id)', { count: 'exact' })
+        .eq('statut', 'envoye')
+        .eq('projects.user_id', user.id);
 
       if (devisErr) {
         console.error('Erreur devis:', devisErr);
@@ -42,8 +47,9 @@ export default function ProDashboardScreen({ navigation }) {
       // 2. Factures impayées (statut = 'impayee')
       const { data: facturesData, error: facturesErr } = await supabase
         .from('factures')
-        .select('id', { count: 'exact' })
-        .eq('statut', 'impayee');
+        .select('id, projects!inner(user_id)', { count: 'exact' })
+        .eq('statut', 'impayee')
+        .eq('projects.user_id', user.id);
 
       if (facturesErr) {
         console.error('Erreur factures:', facturesErr);
@@ -56,8 +62,9 @@ export default function ProDashboardScreen({ navigation }) {
 
       const { data: caData, error: caErr } = await supabase
         .from('factures')
-        .select('montant_ttc')
+        .select('montant_ttc, projects!inner(user_id)')
         .eq('statut', 'paye')
+        .eq('projects.user_id', user.id)
         .gte('created_at', firstDayOfMonth.toISOString())
         .lte('created_at', lastDayOfMonth.toISOString());
 
@@ -71,6 +78,7 @@ export default function ProDashboardScreen({ navigation }) {
       const { data: chantiersData, error: chantiersErr } = await supabase
         .from('projects')
         .select('id', { count: 'exact' })
+        .eq('user_id', user.id)
         .in('status', ['active', 'paused']); // On compte aussi en pause comme "actifs"
 
       if (chantiersErr) {

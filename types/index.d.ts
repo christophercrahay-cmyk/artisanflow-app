@@ -100,7 +100,7 @@ export interface BrandSettings {
   company_phone?: string | null;
   company_email?: string | null;
   tva_default: number;
-  template_default: string;
+  template_default: 'minimal' | 'classique' | 'bandeBleue' | 'premiumNoirOr' | 'bleuElectrique' | 'graphite' | 'ecoVert' | 'chantierOrange' | 'architecte' | 'filigraneLogo';
   devis_prefix: string;
   facture_prefix: string;
   user_id?: string | null;

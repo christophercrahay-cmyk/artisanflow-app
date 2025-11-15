@@ -70,7 +70,7 @@ export function usePagination(fetchFunction, pageSize = 20) {
    * Charge la page suivante
    */
   const loadMore = useCallback(async () => {
-    if (loading || !hasMore) return;
+    if (loading || !hasMore) {return;}
     
     try {
       setLoading(true);

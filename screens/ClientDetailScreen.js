@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,14 +6,9 @@ import {
   FlatList,
   Alert,
   StyleSheet,
-  TextInput,
-  Modal,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import { supabase } from '../supabaseClient';
 import { useAppStore } from '../store/useAppStore';
 import { useSafeTheme } from '../theme/useSafeTheme';
@@ -26,19 +21,11 @@ export default function ClientDetailScreen({ route, navigation }) {
   const { clientId } = route.params;
   const [client, setClient] = useState(null);
   const [projects, setProjects] = useState([]);
-  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectAddress, setNewProjectAddress] = useState('');
-  const [newProjectStatus, setNewProjectStatus] = useState('planned');
-  const [creatingProject, setCreatingProject] = useState(false);
+  const [showArchived, setShowArchived] = useState(false); // Toggle affichage chantiers archivés
 
   const styles = useMemo(() => getStyles(theme), [theme]);
 
-  useEffect(() => {
-    loadData();
-  }, [clientId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const { data: clientData, error: clientErr } = await supabase
         .from('clients')
@@ -47,6 +34,12 @@ export default function ClientDetailScreen({ route, navigation }) {
         .single();
 
       if (clientErr) {
+        // PGRST116 = aucune ligne trouvée (client peut avoir été supprimé)
+        if (clientErr.code === 'PGRST116') {
+          Alert.alert('Client introuvable', 'Ce client n\'existe plus ou a été supprimé');
+          navigation.goBack();
+          return;
+        }
         console.error('Erreur chargement client:', clientErr);
         Alert.alert('Erreur', 'Impossible de charger le client');
         return;
@@ -56,11 +49,11 @@ export default function ClientDetailScreen({ route, navigation }) {
         useAppStore.getState().setCurrentClient(clientData);
       }
 
+      // Charger tous les projets (archivés ou non) pour permettre le toggle
       const { data: projData, error: projErr } = await supabase
         .from('projects')
         .select('*')
         .eq('client_id', clientId)
-        .eq('archived', false) // Filtrer les projets non-archivés par défaut
         .order('created_at', { ascending: false });
 
       if (projErr) {
@@ -73,7 +66,15 @@ export default function ClientDetailScreen({ route, navigation }) {
       console.error('Exception chargement données:', err);
       Alert.alert('Erreur', 'Erreur lors du chargement');
     }
-  };
+  }, [clientId]);
+
+  // ✅ Recharger automatiquement quand on revient sur l'écran
+  // (par ex. après suppression d'un projet)
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   const handleArchiveProject = async (project) => {
     Alert.alert(
@@ -99,6 +100,9 @@ export default function ClientDetailScreen({ route, navigation }) {
                 return;
               }
 
+              // ✅ Nettoyer le store pour éviter le cache
+              useAppStore.getState().clearProject();
+              
               showSuccess('Chantier archivé');
               await loadData();
             } catch (err) {
@@ -110,68 +114,85 @@ export default function ClientDetailScreen({ route, navigation }) {
     );
   };
 
-  const createProject = async () => {
-    if (!newProjectName.trim()) {
-      Alert.alert('Erreur', 'Le nom du chantier est obligatoire');
-      return;
-    }
-
-    try {
-      setCreatingProject(true);
-
-      // Récupérer l'utilisateur connecté pour RLS
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Utilisateur non authentifié');
-
-      const projectAddress = newProjectAddress.trim() || null;
-      const projectStatus = newProjectStatus || 'planned';
-
-      const { error } = await supabase.from('projects').insert([
+  const handleUnarchiveProject = async (project) => {
+    Alert.alert(
+      'Désarchiver le chantier',
+      `Voulez-vous restaurer "${project.name}" ?\n\nLe chantier redeviendra visible.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
         {
-          name: newProjectName.trim(),
-          address: projectAddress,
-          client_id: clientId,
-          user_id: user.id, // Nécessaire pour RLS
-          status: projectStatus,
-          status_text: projectStatus,
-          archived: false, // Nouveau projet non-archivé par défaut
+          text: 'Désarchiver',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('projects')
+                .update({
+                  archived: false,
+                  archived_at: null,
+                })
+                .eq('id', project.id);
+
+              if (error) {
+                showError('Impossible de désarchiver le chantier');
+                return;
+              }
+
+              showSuccess('Chantier restauré');
+              await loadData();
+            } catch (err) {
+              showError('Erreur lors de la restauration');
+            }
+          },
         },
-      ]);
+      ]
+    );
+  };
 
-      if (error) {
-        console.error('🔴 [CreateProject] Erreur DB:', error);
-        throw error;
-      }
+  const handleDeleteArchivedProject = async (project) => {
+    Alert.alert(
+      'Supprimer définitivement',
+      `⚠️ ATTENTION : Supprimer "${project.name}" ?\n\nToutes les photos, notes et documents seront DÉFINITIVEMENT supprimés.\n\nCette action est IRRÉVERSIBLE.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('projects')
+                .delete()
+                .eq('id', project.id);
 
-      console.log('✅ [CreateProject] Chantier créé');
+              if (error) {
+                showError('Impossible de supprimer le chantier');
+                return;
+              }
 
-      // Reset
-      setNewProjectName('');
-      setNewProjectAddress('');
-      setNewProjectStatus('planned');
-      setShowNewProjectModal(false);
-      
-      // Refresh
-      await loadData();
-      Alert.alert('✅ Succès', 'Chantier créé avec succès');
-    } catch (err) {
-      console.error('🔴 [CreateProject] Exception:', err);
-      Alert.alert('Erreur', err.message || 'Impossible de créer le chantier');
-    } finally {
-      setCreatingProject(false);
-    }
+              showSuccess('Chantier supprimé définitivement');
+              await loadData();
+            } catch (err) {
+              showError('Erreur lors de la suppression');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const getStatusConfig = (status) => {
     switch (status) {
-      case 'planned':
-        return { icon: 'clock', label: 'Planifié', color: theme.colors.warning };
+      case 'active':
+        return { icon: 'play-circle', label: 'Actif', color: '#16A34A' }; // Vert vif
       case 'in_progress':
-        return { icon: 'play-circle', label: 'En cours', color: theme.colors.accent };
+        return { icon: 'play-circle', label: 'En cours', color: '#16A34A' }; // Vert vif
+      case 'planned':
+        return { icon: 'clock', label: 'Planifié', color: '#F59E0B' }; // Orange vif
       case 'done':
-        return { icon: 'check-circle', label: 'Terminé', color: theme.colors.success };
+        return { icon: 'check-circle', label: 'Terminé', color: '#3B82F6' }; // Bleu vif
       default:
-        return { icon: 'help-circle', label: status, color: theme.colors.textSecondary };
+        return { icon: 'play-circle', label: 'En cours', color: '#16A34A' }; // Par défaut = En cours (vert)
     }
   };
 
@@ -180,7 +201,41 @@ export default function ClientDetailScreen({ route, navigation }) {
       <FlatList
         ListHeaderComponent={
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
+            <TouchableOpacity 
+              onPress={() => {
+                // ⚠️ NAVIGATION VERROUILLÉE - NE PAS MODIFIER SANS RAISON VALABLE
+                // Si on peut revenir en arrière, utiliser goBack()
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  // Sinon, réinitialiser vers ClientsList
+                  navigation.dispatch(
+                    CommonActions.reset({
+                      index: 0,
+                      routes: [
+                        {
+                          name: 'Main',
+                          state: {
+                            routes: [
+                              {
+                                name: 'ClientsTab',
+                                state: {
+                                  routes: [{ name: 'ClientsList' }],
+                                  index: 0,
+                                },
+                              },
+                            ],
+                            index: 0,
+                          },
+                        },
+                      ],
+                    })
+                  );
+                }
+              }} 
+              style={styles.backBtn} 
+              activeOpacity={0.7}
+            >
               <Feather name="arrow-left" size={24} color={theme.colors.accent} strokeWidth={2.5} />
               <Text style={styles.backBtnText}>Retour</Text>
             </TouchableOpacity>
@@ -218,51 +273,103 @@ export default function ClientDetailScreen({ route, navigation }) {
         renderItem={() => (
           <View style={styles.content}>
             <View style={styles.sectionHeader}>
-              <Feather name="folder" size={20} color={theme.colors.accent} />
-              <Text style={styles.sectionTitle}>Chantiers ({projects.length})</Text>
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => {
-                  setNewProjectAddress(client?.address || '');
-                  setShowNewProjectModal(true);
-                }}
-                activeOpacity={0.7}
-              >
-                <Feather name="plus" size={18} color={theme.colors.text} strokeWidth={2.5} />
-                <Text style={styles.addButtonText}>Nouveau</Text>
-              </TouchableOpacity>
+              <View style={styles.sectionTitleRow}>
+                <Feather name="folder" size={20} color={theme.colors.accent} />
+                <Text style={styles.sectionTitle}>
+                  Chantiers ({showArchived ? projects.filter(p => p.archived).length : projects.filter(p => !p.archived).length})
+                </Text>
+              </View>
             </View>
 
-            {projects.map((item) => {
+            {/* Bouton Nouveau chantier */}
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => {
+                // ✅ Nettoyer le projet en cours avant de créer un nouveau
+                useAppStore.getState().clearProject();
+                
+                // Navigation vers ProjectCreateScreen avec le clientId pré-rempli
+                navigation.navigate('ProjectCreate', { clientId: clientId });
+              }}
+              activeOpacity={0.7}
+            >
+              <Feather name="plus" size={18} color="#FFFFFF" strokeWidth={2.5} />
+              <Text style={styles.addButtonText}>Nouveau chantier</Text>
+            </TouchableOpacity>
+
+            {/* Toggle pour afficher les archivés */}
+            <TouchableOpacity
+              style={[styles.toggleButton, showArchived && styles.toggleButtonActive]}
+              onPress={() => setShowArchived(!showArchived)}
+              activeOpacity={0.7}
+            >
+              <Feather 
+                name={showArchived ? "eye-off" : "archive"} 
+                size={16} 
+                color={showArchived ? theme.colors.text : theme.colors.textSecondary} 
+              />
+              <Text style={[styles.toggleButtonText, showArchived && styles.toggleButtonTextActive]}>
+                {showArchived ? '🔓 Masquer les archivés' : '📦 Afficher les archivés'}
+              </Text>
+            </TouchableOpacity>
+
+            {projects.filter(p => showArchived ? p.archived : !p.archived).map((item) => {
               const statusConfig = getStatusConfig(item.status || item.status_text);
               return (
-                <TouchableOpacity
-                  key={item.id}
-                  style={styles.card}
-                  onPress={() => navigation.navigate('ProjectDetail', { projectId: item.id })}
-                  onLongPress={() => handleArchiveProject(item)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.cardTitle}>{item.name}</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: statusConfig.color + '20' }]}>
-                      <Feather name={statusConfig.icon} size={14} color={statusConfig.color} />
-                      <Text style={[styles.statusText, { color: statusConfig.color }]}>
-                        {statusConfig.label}
-                      </Text>
+                <View key={item.id}>
+                  <TouchableOpacity
+                    style={styles.card}
+                    onPress={() => navigation.navigate('ProjectDetail', { projectId: item.id })}
+                    onLongPress={() => item.archived ? handleUnarchiveProject(item) : handleArchiveProject(item)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.cardTitle}>{item.name}</Text>
+                      <View style={[styles.statusBadge, { backgroundColor: `${statusConfig.color  }20` }]}>
+                        <Feather name={statusConfig.icon} size={14} color={statusConfig.color} />
+                        <Text style={[styles.statusText, { color: statusConfig.color }]}>
+                          {statusConfig.label}
+                        </Text>
+                      </View>
+                    </View>
+                    {item.address ? (
+                      <View style={styles.infoRow}>
+                        <Feather name="map-pin" size={14} color={theme.colors.textSecondary} />
+                        <Text style={styles.cardLine}>{item.address}</Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                  
+                {/* Badge + Boutons pour les chantiers archivés */}
+                {item.archived && (
+                  <View style={styles.archivedSection}>
+                    <View style={styles.archivedBadge}>
+                      <Text style={styles.archivedBadgeText}>📦 Archivé</Text>
+                    </View>
+                    <View style={styles.archivedActions}>
+                      <TouchableOpacity
+                        style={styles.unarchiveButton}
+                        onPress={() => handleUnarchiveProject(item)}
+                        activeOpacity={0.7}
+                      >
+                        <Feather name="unlock" size={16} color="#FFFFFF" />
+                        <Text style={styles.unarchiveButtonText}>Désarchiver</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deleteArchivedButton}
+                        onPress={() => handleDeleteArchivedProject(item)}
+                        activeOpacity={0.7}
+                      >
+                        <Feather name="trash-2" size={16} color="#FFFFFF" />
+                      </TouchableOpacity>
                     </View>
                   </View>
-                  {item.address ? (
-                    <View style={styles.infoRow}>
-                      <Feather name="map-pin" size={14} color={theme.colors.textSecondary} />
-                      <Text style={styles.cardLine}>{item.address}</Text>
-                    </View>
-                  ) : null}
-                </TouchableOpacity>
+                )}
+                </View>
               );
             })}
 
-            {projects.length === 0 && (
+            {projects.filter(p => showArchived ? p.archived : !p.archived).length === 0 && (
               <View style={styles.emptyContainer}>
                 <Feather name="folder-plus" size={48} color={theme.colors.textMuted} />
                 <Text style={styles.empty}>Aucun chantier</Text>
@@ -275,86 +382,6 @@ export default function ClientDetailScreen({ route, navigation }) {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Modal création chantier - VERSION SIMPLIFIÉE */}
-      <Modal
-        visible={showNewProjectModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowNewProjectModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={{ marginBottom: 20 }}>
-              <Text style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text, marginBottom: 20 }}>
-                Nouveau chantier
-              </Text>
-              
-              <TextInput
-                placeholder="Nom du chantier *"
-                placeholderTextColor={theme.colors.textMuted}
-                value={newProjectName}
-                onChangeText={setNewProjectName}
-                style={{
-                  backgroundColor: theme.colors.surfaceElevated,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  borderRadius: 12,
-                  padding: 16,
-                  fontSize: 16,
-                  color: theme.colors.text,
-                  marginBottom: 16,
-                }}
-                autoFocus
-              />
-
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <TouchableOpacity
-                  onPress={createProject}
-                  disabled={creatingProject}
-                  style={{
-                    flex: 1,
-                    backgroundColor: theme.colors.accent,
-                    paddingVertical: 16,
-                    borderRadius: 12,
-                    alignItems: 'center',
-                    opacity: creatingProject ? 0.6 : 1,
-                  }}
-                >
-                  {creatingProject ? (
-                    <ActivityIndicator color={theme.colors.text} />
-                  ) : (
-                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
-                      Créer
-                    </Text>
-                  )}
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowNewProjectModal(false);
-                    setNewProjectName('');
-                    setNewProjectAddress('');
-                    setNewProjectStatus('planned');
-                  }}
-                  style={{
-                    flex: 1,
-                    backgroundColor: theme.colors.surface,
-                    paddingVertical: 16,
-                    borderRadius: 12,
-                    alignItems: 'center',
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
-                  }}
-                >
-                  <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 16 }}>
-                    Annuler
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -388,7 +415,7 @@ const getStyles = (theme) => StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: theme.colors.accent + '20',
+    backgroundColor: `${theme.colors.accent  }20`,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -410,30 +437,34 @@ const getStyles = (theme) => StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
   },
   sectionHeader: {
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+  },
+  sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: theme.spacing.lg,
+    gap: theme.spacing.sm,
     marginBottom: theme.spacing.md,
   },
   sectionTitle: {
     ...theme.typography.h4,
-    marginLeft: theme.spacing.sm,
-    flex: 1,
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: theme.colors.accent,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 12,
+    paddingHorizontal: theme.spacing.lg,
     borderRadius: theme.borderRadius.md,
+    gap: theme.spacing.xs,
+    marginBottom: theme.spacing.md,
     ...theme.shadows.md,
   },
   addButtonText: {
     ...theme.typography.body,
     fontWeight: '700',
-    marginLeft: theme.spacing.xs,
-    color: theme.colors.text,
+    color: '#FFFFFF',
   },
   card: {
     ...theme.card,
@@ -465,6 +496,86 @@ const getStyles = (theme) => StyleSheet.create({
   cardLine: {
     ...theme.typography.bodySmall,
     marginLeft: theme.spacing.xs,
+  },
+  archivedSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: theme.colors.surface,
+    borderBottomLeftRadius: theme.borderRadius.md,
+    borderBottomRightRadius: theme.borderRadius.md,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    marginBottom: theme.spacing.md,
+  },
+  archivedActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    marginBottom: theme.spacing.md,
+  },
+  toggleButtonActive: {
+    backgroundColor: theme.colors.surfaceElevated,
+    borderColor: theme.colors.accent,
+  },
+  toggleButtonText: {
+    ...theme.typography.bodySmall,
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.textSecondary,
+  },
+  toggleButtonTextActive: {
+    color: theme.colors.text,
+  },
+  archivedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: `${theme.colors.textMuted}25`,
+    borderRadius: theme.borderRadius.sm,
+  },
+  archivedBadgeText: {
+    ...theme.typography.bodySmall,
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.colors.textMuted,
+  },
+  unarchiveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#16A34A',
+    borderRadius: theme.borderRadius.md,
+  },
+  unarchiveButtonText: {
+    ...theme.typography.bodySmall,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  deleteArchivedButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EF4444',
+    borderRadius: theme.borderRadius.md,
   },
   emptyContainer: {
     alignItems: 'center',

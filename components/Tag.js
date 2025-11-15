@@ -17,31 +17,31 @@ export default function Tag({
     switch (variant) {
       case 'success':
         return {
-          backgroundColor: theme.colors.success + '20',
+          backgroundColor: `${theme.colors.success  }20`,
           borderColor: theme.colors.success,
           textColor: theme.colors.success,
         };
       case 'warning':
         return {
-          backgroundColor: theme.colors.warning + '20',
+          backgroundColor: `${theme.colors.warning  }20`,
           borderColor: theme.colors.warning,
           textColor: theme.colors.warning,
         };
       case 'error':
         return {
-          backgroundColor: theme.colors.error + '20',
+          backgroundColor: `${theme.colors.error  }20`,
           borderColor: theme.colors.error,
           textColor: theme.colors.error,
         };
       case 'info':
         return {
-          backgroundColor: theme.colors.info + '20',
+          backgroundColor: `${theme.colors.info  }20`,
           borderColor: theme.colors.info,
           textColor: theme.colors.info,
         };
       default:
         return {
-          backgroundColor: theme.colors.accent + '20',
+          backgroundColor: `${theme.colors.accent  }20`,
           borderColor: theme.colors.accent,
           textColor: theme.colors.accent,
         };

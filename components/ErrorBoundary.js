@@ -1,46 +1,47 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import logger from '../utils/logger';
-import { captureException } from '../utils/sentryInit';
 
+/**
+ * Error Boundary pour capturer les erreurs React
+ * et afficher un écran de fallback élégant
+ */
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = {
-      hasError: false,
+    this.state = { 
+      hasError: false, 
       error: null,
       errorInfo: null,
     };
   }
 
   static getDerivedStateFromError(error) {
-    return { hasError: true };
+    return { hasError: true, error };
   }
 
   componentDidCatch(error, errorInfo) {
-    // Logger l'erreur
-    logger.error('ErrorBoundary', 'Erreur React catchée', {
-      error: error.toString(),
-      componentStack: errorInfo.componentStack,
-    });
-
-    // Mettre à jour le state avec les détails
+    console.error('🔥 ErrorBoundary caught:', error);
+    console.error('📍 Component stack:', errorInfo.componentStack);
+    
     this.setState({
       error,
       errorInfo,
     });
 
-    // Envoyer à Sentry
-    captureException(error, {
-      componentStack: errorInfo.componentStack,
-      component: 'ErrorBoundary',
-    });
+    // TODO: Envoyer à Sentry quand configuré
+    // Sentry.captureException(error, {
+    //   contexts: {
+    //     react: {
+    //       componentStack: errorInfo.componentStack,
+    //     },
+    //   },
+    // });
   }
 
-  resetError = () => {
-    this.setState({
-      hasError: false,
+  handleReset = () => {
+    this.setState({ 
+      hasError: false, 
       error: null,
       errorInfo: null,
     });
@@ -48,63 +49,39 @@ class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
-      const isDev = __DEV__;
-
       return (
         <View style={styles.container}>
-          <View style={styles.content}>
-            <Feather name="alert-triangle" size={64} color="#DC2626" />
-            
-            <Text style={styles.title}>Une erreur s'est produite</Text>
-            
-            <Text style={styles.message}>
-              {isDev 
-                ? "L'application a rencontré une erreur. Détails ci-dessous :"
-                : "Quelque chose s'est mal passé. Veuillez réessayer."
-              }
-            </Text>
+          <Feather name="alert-triangle" size={64} color="#EF4444" />
+          
+          <Text style={styles.title}>Oups ! Une erreur est survenue</Text>
+          
+          <Text style={styles.message}>
+            {this.state.error?.message || 'Erreur inconnue'}
+          </Text>
 
-            {isDev && this.state.error && (
-              <ScrollView style={styles.errorDetails}>
-                <Text style={styles.errorTitle}>Erreur :</Text>
-                <Text style={styles.errorText}>{this.state.error.toString()}</Text>
-                
-                {this.state.errorInfo && (
-                  <>
-                    <Text style={[styles.errorTitle, { marginTop: 16 }]}>Stack :</Text>
-                    <Text style={styles.errorText}>
-                      {this.state.errorInfo.componentStack}
-                    </Text>
-                  </>
-                )}
-              </ScrollView>
-            )}
-
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={this.resetError}
-                activeOpacity={0.8}
-              >
-                <Feather name="refresh-cw" size={20} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Réessayer</Text>
-              </TouchableOpacity>
-
-              {isDev && (
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={() => {
-                    console.log('Error details:', this.state.error);
-                    console.log('Error info:', this.state.errorInfo);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Feather name="terminal" size={20} color="#9CA3AF" />
-                  <Text style={styles.secondaryButtonText}>Log Console</Text>
-                </TouchableOpacity>
-              )}
+          {__DEV__ && this.state.errorInfo && (
+            <View style={styles.debugContainer}>
+              <Text style={styles.debugTitle}>Debug Info (dev only):</Text>
+              <Text style={styles.debugText} numberOfLines={10}>
+                {this.state.errorInfo.componentStack}
+              </Text>
             </View>
-          </View>
+          )}
+          
+          <TouchableOpacity 
+            style={styles.button} 
+            onPress={this.handleReset}
+            activeOpacity={0.7}
+          >
+            <Feather name="refresh-cw" size={20} color="#fff" />
+            <Text style={styles.buttonText}>Réessayer</Text>
+          </TouchableOpacity>
+
+          {__DEV__ && (
+            <Text style={styles.helpText}>
+              💡 En développement : vérifiez la console pour plus de détails
+            </Text>
+          )}
         </View>
       );
     }
@@ -116,14 +93,10 @@ class ErrorBoundary extends React.Component {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F1115',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
-  },
-  content: {
-    maxWidth: 500,
-    alignItems: 'center',
+    backgroundColor: '#1A1D22',
   },
   title: {
     fontSize: 24,
@@ -137,68 +110,55 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#9CA3AF',
     textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 24,
+    marginBottom: 32,
+    paddingHorizontal: 16,
   },
-  errorDetails: {
-    backgroundColor: '#1A1D22',
-    borderRadius: 12,
+  debugContainer: {
+    backgroundColor: '#0A0A0A',
+    borderRadius: 8,
     padding: 16,
-    maxHeight: 300,
-    width: '100%',
     marginBottom: 24,
+    maxWidth: '90%',
     borderWidth: 1,
-    borderColor: '#DC2626',
+    borderColor: '#333',
   },
-  errorTitle: {
+  debugTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#DC2626',
+    color: '#FBBF24',
     marginBottom: 8,
   },
-  errorText: {
+  debugText: {
     fontSize: 12,
     color: '#D1D5DB',
     fontFamily: 'monospace',
-    lineHeight: 18,
   },
-  buttonContainer: {
-    width: '100%',
-    gap: 12,
-  },
-  primaryButton: {
-    backgroundColor: '#1D4ED8',
+  button: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
     gap: 8,
+    backgroundColor: '#8B5CF6',
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 12,
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  primaryButtonText: {
-    color: '#FFFFFF',
+  buttonText: {
+    color: '#fff',
     fontSize: 16,
     fontWeight: '700',
   },
-  secondaryButton: {
-    backgroundColor: '#1A1D22',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2A2E35',
-    gap: 8,
-  },
-  secondaryButtonText: {
-    color: '#9CA3AF',
-    fontSize: 16,
-    fontWeight: '600',
+  helpText: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 24,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });
 
 export default ErrorBoundary;
-

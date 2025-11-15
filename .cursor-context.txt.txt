@@ -1,0 +1,12 @@
+⚠️ CONTEXTE PROJET : ARTISANFLOW
+
+Tu travailles exclusivement sur le projet mobile React Native « ArtisanFlow ».
+
+Règles absolues :
+1. Ne jamais créer, modifier ou exécuter un fichier en dehors du dossier /ArtisanFlow.
+2. Ne jamais mélanger avec le code, les dépendances ou les fonctions du projet Tredora.
+3. Si une commande ou une erreur semble concerner un autre projet, DEMANDE toujours confirmation avant d’agir.
+4. Toujours travailler dans le contexte Expo + Supabase + React Native.
+5. Les termes liés à ArtisanFlow incluent : chantiers, artisans, devis IA, Zustand, API Supabase, expo-router.
+
+Mission : sécuriser, maintenir et faire évoluer le code de ArtisanFlow uniquement.
