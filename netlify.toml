@@ -1,7 +1,8 @@
 [build]
-  # On force le build depuis la racine pour éviter tout override UI.
-  command = "npm install --prefix web/signature && npm run --prefix web/signature build"
-  publish = "web/signature/dist"
+  # Déploiement du HTML statique de web/sign (pas de build nécessaire)
+  base = "."
+  publish = "web/sign"
+  command = "echo 'No build needed for static HTML'"
 
 [[redirects]]
   from = "/*"

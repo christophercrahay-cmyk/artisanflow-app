@@ -45,7 +45,7 @@ npm start
 
 2. **Résultat attendu** :
    - Une alerte s'affiche avec le lien de signature
-   - Format du lien : `https://artisanflow.app/sign/[devisId]/[token]`
+   - Format du lien : `https://artisanflowsignatures.netlify.app/sign/[devisId]/[token]`
    - **Copier ce lien** (vous en aurez besoin)
 
 3. **Vérifier dans Supabase** :
@@ -62,7 +62,7 @@ npm start
 
 1. **Dans l'app** :
    - Extraire le `devisId` et le `token` du lien généré
-   - Exemple : si le lien est `https://artisanflow.app/sign/abc123/xyz789`
+   - Exemple : si le lien est `https://artisanflowsignatures.netlify.app/sign/abc123/xyz789`
      - `devisId` = `abc123`
      - `token` = `xyz789`
 

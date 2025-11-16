@@ -182,6 +182,20 @@ async function handleSign(httpReq: Request, body: SignRequest, ip: string | null
 }
 
 serve(async (request: Request) => {
+  try {
+    console.log('📨 Edge Function - Requête reçue');
+    console.log('📨 Edge Function - URL:', request.url);
+    console.log('📨 Edge Function - Method:', request.method);
+    try {
+      const cloned = request.clone();
+      const bodyPreview = await cloned.json().catch(() => null);
+      console.log('📨 Edge Function - Body:', bodyPreview);
+    } catch (e) {
+      console.log('📨 Edge Function - Body non lisible', e?.message);
+    }
+  } catch (_e) {
+    // ignore logging errors
+  }
   if (request.method === "OPTIONS") {
     const origin = request.headers.get("origin");
     const cors = buildCorsHeaders(origin);

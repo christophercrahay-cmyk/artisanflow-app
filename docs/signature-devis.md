@@ -57,7 +57,7 @@ Ce système permet aux clients de signer électroniquement leurs devis via un li
 3. Copier/partager le lien avec le client
 
 ### Pour le client :
-1. Ouvrir le lien reçu (ex: `https://artisanflow.app/sign/xxx/yyy`)
+1. Ouvrir le lien reçu (ex: `https://artisanflowsignatures.netlify.app/sign/xxx/yyy`)
 2. Vérifier les informations du devis
 3. Remplir nom et email
 4. Cocher la case d'acceptation

@@ -46,13 +46,13 @@ npx expo install react-native-webview
 2. **Trouver la ligne** (vers la ligne 8) :
    ```javascript
    const SIGN_BASE_URL = __DEV__ 
-     ? 'https://artisanflow.app/sign' // À adapter selon votre domaine
-     : 'https://artisanflow.app/sign';
+     ? 'https://artisanflowsignatures.netlify.app/sign' // Domaine public Netlify
+     : 'https://artisanflowsignatures.netlify.app/sign';
    ```
 
 3. **Remplacer** par votre URL réelle :
    - Si vous avez un domaine : `https://votre-domaine.com/sign`
-   - Sinon, pour l'instant, laissez `https://artisanflow.app/sign` (vous devrez configurer le routage plus tard)
+- Sinon, pour l'instant, laissez `https://artisanflowsignatures.netlify.app/sign` (domaine public)
 
 ---
 
@@ -98,7 +98,7 @@ Pour que les liens de signature fonctionnent directement depuis un navigateur ou
 
 ### ✅ Étape 5 : Gérer le routage des Deep Links (OPTIONNEL)
 
-Si vous voulez que les liens `https://artisanflow.app/sign/:devisId/:token` ouvrent directement l'app :
+Si vous voulez que les liens `https://artisanflowsignatures.netlify.app/sign/:devisId/:token` ouvrent directement l'app :
 
 1. **Ouvrir** `App.js`
 

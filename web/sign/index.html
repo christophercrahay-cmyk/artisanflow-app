@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Signature de Devis • ArtisanFlow</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; background:#0F1115; color:#F9FAFB; margin:0; }
+      .container { max-width: 720px; margin: 0 auto; padding: 24px; }
+      .card { background:#1A1D22; border:1px solid #2A2E35; border-radius: 12px; padding: 20px; }
+      h1 { font-size: 20px; margin: 0 0 12px 0; }
+      .muted { color:#9CA3AF; }
+      .row { display:flex; gap:12px; margin-top: 12px; }
+      .col { flex:1; }
+      label { display:block; font-size: 13px; color:#9CA3AF; margin-bottom:6px; }
+      input[type=text] { width:100%; background:#0F1115; color:#F9FAFB; border:1px solid #2A2E35; border-radius:8px; padding:10px 12px; }
+      canvas { width:100%; height: 240px; background:#0F1115; border:1px dashed #374151; border-radius:8px; }
+      .actions { display:flex; gap:8px; margin-top: 16px; }
+      button { background:#1D4ED8; color:#fff; border:none; border-radius:8px; padding:10px 14px; font-weight:700; cursor:pointer; }
+      button.secondary { background:transparent; color:#F9FAFB; border:1px solid #374151; }
+      .error { background:#7f1d1d; color:#fecaca; padding:10px 12px; border-radius:8px; margin-top:12px; }
+      .success { background:#063; color:#baf7d0; padding:10px 12px; border-radius:8px; margin-top:12px; }
+      .center { text-align:center; }
+      a { color:#93c5fd; }
+    </style>
+    <script>
+      // A ADAPTER: URL de l'Edge Function (Supabase) - par défaut, utilise celle du projet fourni
+      const SIGN_FN_BASE = window.SIGN_FN_BASE || 'https://upihalivqstavxijlwaj.supabase.co/functions/v1';
+
+      function q(name) {
+        const url = new URL(window.location.href);
+        return url.searchParams.get(name);
+      }
+
+      async function postJSON(path, body) {
+        const res = await fetch(`${SIGN_FN_BASE}/${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify(body),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.message || 'Erreur');
+        return json;
+      }
+
+      let drawing = false;
+      let ctx, canvas;
+
+      function setupCanvas() {
+        canvas = document.getElementById('sigCanvas');
+        ctx = canvas.getContext('2d');
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+
+        const getPos = (e) => {
+          const rect = canvas.getBoundingClientRect();
+          const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+          const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+          return { x: x * (canvas.width / rect.width), y: y * (canvas.height / rect.height) };
+        };
+
+        const start = (e) => { drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+        const move = (e) => { if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+        const end = () => { drawing = false; };
+
+        canvas.addEventListener('mousedown', start);
+        canvas.addEventListener('mousemove', move);
+        canvas.addEventListener('mouseup', end);
+        canvas.addEventListener('mouseleave', end);
+        canvas.addEventListener('touchstart', start, { passive: true });
+        canvas.addEventListener('touchmove', move, { passive: true });
+        canvas.addEventListener('touchend', end);
+      }
+
+      function clearSignature() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      async function bootstrap() {
+        // Logs détaillés de la page
+        try {
+          console.log('🔍 SignPage - URL complète:', window.location.href);
+          console.log('🔍 SignPage - pathname:', window.location.pathname);
+          console.log('🔍 SignPage - search params:', window.location.search);
+        } catch (e) {
+          console.log('🔍 SignPage - Logs init échoués', e?.message);
+        }
+
+        const token = q('token');
+        const devisId = q('devisId');
+        try {
+          console.log('🔍 SignPage - Params extraits:', { devisId, token });
+        } catch {}
+        const infoBox = document.getElementById('info');
+        const errorBox = document.getElementById('error');
+        const successBox = document.getElementById('success');
+        if (!token) {
+          errorBox.textContent = 'Lien invalide: paramètre "token" manquant.';
+          errorBox.style.display = 'block';
+          return;
+        }
+
+        try {
+          const res = await postJSON('sign-devis', { action: 'info', token });
+          if (!res.ok) {
+            const reasons = { expired: 'Lien expiré', used: 'Lien déjà utilisé', not_found: 'Lien introuvable' };
+            errorBox.textContent = reasons[res.reason] || 'Lien invalide';
+            errorBox.style.display = 'block';
+            return;
+          }
+
+          document.getElementById('artisanName').textContent = res.artisan?.company_name || res.artisan?.full_name || 'Artisan';
+          document.getElementById('devisNumero').textContent = res.devis?.numero || '';
+          document.getElementById('devisAmount').textContent = (res.devis?.montant_ttc != null) ? (res.devis.montant_ttc + ' € TTC') : '-';
+        } catch (e) {
+          errorBox.textContent = 'Erreur de récupération du devis. Réessayez plus tard.';
+          errorBox.style.display = 'block';
+          return;
+        }
+
+        setupCanvas();
+
+        document.getElementById('btnClear').addEventListener('click', clearSignature);
+        document.getElementById('btnSign').addEventListener('click', async () => {
+          errorBox.style.display = 'none';
+          successBox.style.display = 'none';
+
+          const name = (document.getElementById('fullName') as HTMLInputElement).value.trim();
+          if (!name) {
+            errorBox.textContent = 'Veuillez saisir votre nom complet.';
+            errorBox.style.display = 'block';
+            return;
+          }
+
+          // Vérifier que le canvas n'est pas vide (simple heuristique: lire quelques pixels)
+          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          let hasInk = false;
+          for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] !== 0) { hasInk = true; break; } }
+          if (!hasInk) {
+            errorBox.textContent = 'Veuillez signer dans la zone prévue.';
+            errorBox.style.display = 'block';
+            return;
+          }
+
+          const dataUrl = canvas.toDataURL('image/png');
+          try {
+            const r = await postJSON('sign-devis', { action: 'sign', token, name, signatureDataUrl: dataUrl });
+            if (r.ok) {
+              successBox.textContent = 'Merci, votre devis est signé.';
+              successBox.style.display = 'block';
+              document.getElementById('actions').style.display = 'none';
+            } else {
+              const reasons = { expired: 'Lien expiré', used: 'Lien déjà utilisé', not_found: 'Lien introuvable' };
+              errorBox.textContent = reasons[r.reason] || 'Signature impossible.';
+              errorBox.style.display = 'block';
+            }
+          } catch (e) {
+            errorBox.textContent = 'Erreur lors de la signature. Réessayez plus tard.';
+            errorBox.style.display = 'block';
+          }
+        });
+      }
+
+      window.addEventListener('load', bootstrap);
+    </script>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>Signature du devis</h1>
+        <p class="muted">Artisan : <span id="artisanName">-</span></p>
+        <p class="muted">Devis n° <span id="devisNumero">-</span> • <span id="devisAmount">-</span></p>
+
+        <div id="error" class="error" style="display:none"></div>
+        <div id="success" class="success" style="display:none"></div>
+
+        <div class="row">
+          <div class="col">
+            <label>Votre nom complet</label>
+            <input id="fullName" type="text" placeholder="Ex: Marie Dupont" />
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <label>Signature</label>
+          <div style="position:relative;">
+            <canvas id="sigCanvas" width="1000" height="500"></canvas>
+          </div>
+        </div>
+
+        <p class="muted" style="margin-top: 8px;">
+          En signant, vous acceptez le devis et les conditions générales.
+        </p>
+
+        <div id="actions" class="actions">
+          <button id="btnSign">Signer le devis</button>
+          <button id="btnClear" class="secondary">Effacer</button>
+        </div>
+      </div>
+      <p class="center muted" style="margin-top:16px;">
+        Besoin d’aide ? Contactez l’artisan qui vous a envoyé ce lien.
+      </p>
+    </div>
+  </body>
+</html>
+
+

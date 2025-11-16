@@ -7,10 +7,10 @@ import { supabase } from '../../supabaseClient';
 import logger from '../../utils/logger';
 
 // URL de base pour les liens de signature publique
-// TODO: Remplacer par l'URL de production réelle
+// Domaine public Netlify pour la page de signature
 const SIGN_BASE_URL = __DEV__ 
-  ? 'https://artisanflow.app/sign' // À adapter selon votre domaine
-  : 'https://artisanflow.app/sign';
+  ? 'https://artisanflowsignatures.netlify.app/sign'
+  : 'https://artisanflowsignatures.netlify.app/sign';
 
 /**
  * Génère un lien de signature pour un devis
@@ -55,9 +55,15 @@ export async function generateSignatureLink(devisId) {
 
     // Si le token existe déjà et le devis n'est pas encore signé, le réutiliser
     if (devis.signature_token && devis.signature_status === 'pending') {
-      const link = `${SIGN_BASE_URL}/${devisId}/${devis.signature_token}`;
+      const finalUrl = `${SIGN_BASE_URL}?devisId=${encodeURIComponent(devisId)}&token=${encodeURIComponent(devis.signature_token)}`;
+      console.log('🔗 Génération lien signature (réutilisé)');
+      console.log('🔗 SignatureService - SIGN_BASE_URL:', SIGN_BASE_URL);
+      console.log('🔗 SignatureService - devisId:', devisId);
+      console.log('🔗 SignatureService - token:', devis.signature_token);
+      console.log('🔗 SignatureService - URL finale:', finalUrl);
+      console.log('🔗 SignatureService - Longueur du lien:', finalUrl.length);
       logger.info('SignatureService', 'Token existant réutilisé', { devisId });
-      return link;
+      return finalUrl;
     }
 
     // Générer un nouveau token sécurisé
@@ -77,9 +83,15 @@ export async function generateSignatureLink(devisId) {
       throw new Error('Impossible de générer le lien de signature');
     }
 
-    const link = `${SIGN_BASE_URL}/${devisId}/${signatureToken}`;
-    logger.success('SignatureService', 'Lien de signature généré', { devisId, link });
-    return link;
+    const finalUrl = `${SIGN_BASE_URL}?devisId=${encodeURIComponent(devisId)}&token=${encodeURIComponent(signatureToken)}`;
+    console.log('🔗 Génération lien signature');
+    console.log('🔗 SignatureService - SIGN_BASE_URL:', SIGN_BASE_URL);
+    console.log('🔗 SignatureService - devisId:', devisId);
+    console.log('🔗 SignatureService - token:', signatureToken);
+    console.log('🔗 SignatureService - URL finale:', finalUrl);
+    console.log('🔗 SignatureService - Longueur du lien:', finalUrl.length);
+    logger.success('SignatureService', 'Lien de signature généré', { devisId, finalUrl });
+    return finalUrl;
   } catch (error) {
     logger.error('SignatureService', 'Erreur generateSignatureLink', error);
     throw error;
