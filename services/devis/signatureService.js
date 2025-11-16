@@ -35,7 +35,6 @@ export async function generateSignatureLink(devisId) {
       .from('devis')
       .select(`
         id,
-        signature_token,
         signature_status,
         projects!inner(user_id)
       `)
@@ -53,38 +52,71 @@ export async function generateSignatureLink(devisId) {
       throw new Error('Accès non autorisé à ce devis');
     }
 
-    // Si le token existe déjà et le devis n'est pas encore signé, le réutiliser
-    if (devis.signature_token && devis.signature_status === 'pending') {
-      const finalUrl = `${SIGN_BASE_URL}?devisId=${encodeURIComponent(devisId)}&token=${encodeURIComponent(devis.signature_token)}`;
-      console.log('🔗 Génération lien signature (réutilisé)');
+    // 1) Vérifier si un lien actif existe déjà dans devis_signature_links
+    const nowIso = new Date().toISOString();
+    const { data: existingLinks, error: linksError } = await supabase
+      .from('devis_signature_links')
+      .select('id, token, expires_at, used_at')
+      .eq('devis_id', devisId)
+      .eq('artisan_id', user.id)
+      .is('used_at', null)
+      .gt('expires_at', nowIso)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (linksError) {
+      logger.error('SignatureService', 'Erreur lecture devis_signature_links', linksError);
+      // On ne bloque pas, on continuera à générer un nouveau lien
+    }
+
+    const activeLink = existingLinks && existingLinks.length > 0 ? existingLinks[0] : null;
+
+    if (activeLink?.token) {
+      const finalUrl = `${SIGN_BASE_URL}?devisId=${encodeURIComponent(devisId)}&token=${encodeURIComponent(activeLink.token)}`;
+      console.log('🔗 Génération lien signature (réutilisé depuis devis_signature_links)');
       console.log('🔗 SignatureService - SIGN_BASE_URL:', SIGN_BASE_URL);
       console.log('🔗 SignatureService - devisId:', devisId);
-      console.log('🔗 SignatureService - token:', devis.signature_token);
+      console.log('🔗 SignatureService - token:', activeLink.token);
       console.log('🔗 SignatureService - URL finale:', finalUrl);
       console.log('🔗 SignatureService - Longueur du lien:', finalUrl.length);
-      logger.info('SignatureService', 'Token existant réutilisé', { devisId });
+      logger.info('SignatureService', 'Lien de signature existant réutilisé', { devisId, linkId: activeLink.id });
       return finalUrl;
     }
 
-    // Générer un nouveau token sécurisé
+    // 2) Générer un nouveau token sécurisé
     const signatureToken = crypto.randomUUID ? crypto.randomUUID() : generateUUID();
 
-    // Mettre à jour le devis avec le token et le statut 'pending'
+    // 3) Créer une entrée dans devis_signature_links (source de vérité pour l'Edge Function)
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 jours
+    const { error: insertLinkError } = await supabase
+      .from('devis_signature_links')
+      .insert({
+        devis_id: devisId,
+        artisan_id: user.id,
+        token: signatureToken,
+        expires_at: expiresAt,
+      });
+
+    if (insertLinkError) {
+      logger.error('SignatureService', 'Erreur insertion devis_signature_links', insertLinkError);
+      throw new Error('Impossible de créer le lien de signature');
+    }
+
+    // 4) Mettre à jour le devis avec le statut 'pending' (optionnel pour affichage)
     const { error: updateError } = await supabase
       .from('devis')
       .update({
-        signature_token: signatureToken,
         signature_status: 'pending',
       })
       .eq('id', devisId);
 
     if (updateError) {
-      logger.error('SignatureService', 'Erreur mise à jour devis', updateError);
-      throw new Error('Impossible de générer le lien de signature');
+      logger.error('SignatureService', 'Erreur mise à jour devis (signature_status)', updateError);
+      // On ne jette pas l'erreur ici car le lien est créé; on laisse quand même l'utilisateur utiliser le lien
     }
 
     const finalUrl = `${SIGN_BASE_URL}?devisId=${encodeURIComponent(devisId)}&token=${encodeURIComponent(signatureToken)}`;
-    console.log('🔗 Génération lien signature');
+    console.log('🔗 Génération lien signature (nouvelle entrée devis_signature_links)');
     console.log('🔗 SignatureService - SIGN_BASE_URL:', SIGN_BASE_URL);
     console.log('🔗 SignatureService - devisId:', devisId);
     console.log('🔗 SignatureService - token:', signatureToken);
