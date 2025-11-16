@@ -26,6 +26,8 @@
     <script>
       // A ADAPTER: URL de l'Edge Function (Supabase) - par défaut, utilise celle du projet fourni
       const SIGN_FN_BASE = window.SIGN_FN_BASE || 'https://upihalivqstavxijlwaj.supabase.co/functions/v1';
+      console.log('🌐 PAGE SIGNATURE CHARGÉE');
+      console.log('🌐 URL complète:', window.location.href);
 
       function q(name) {
         const url = new URL(window.location.href);
@@ -33,12 +35,25 @@
       }
 
       async function postJSON(path, body) {
-        const res = await fetch(`${SIGN_FN_BASE}/${path}`, {
+        const url = `${SIGN_FN_BASE}/${path}`;
+        try {
+          console.log('📡 URL Edge Function:', url);
+          console.log('📡 Body envoyé:', JSON.stringify(body));
+        } catch {}
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type':'application/json' },
           body: JSON.stringify(body),
+        }).catch((error) => {
+          console.error('❌ ERREUR COMPLÈTE (fetch):', error);
+          throw error;
         });
-        const json = await res.json().catch(() => ({}));
+        try { console.log('✅ Réponse HTTP reçue:', res.status); } catch {}
+        const json = await res.json().catch((e) => {
+          console.error('❌ ERREUR json():', e);
+          return {};
+        });
+        try { console.log('✅ DATA reçue:', json); } catch {}
         if (!res.ok) throw new Error(json?.message || 'Erreur');
         return json;
       }
@@ -59,14 +74,26 @@
           return { x: x * (canvas.width / rect.width), y: y * (canvas.height / rect.height) };
         };
 
-        const start = (e) => { drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
-        const move = (e) => { if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+        const start = (e) => { 
+          drawing = true; 
+          console.log('🖊️ Dessin commencé'); 
+          const p = getPos(e); 
+          ctx.beginPath(); 
+          ctx.moveTo(p.x, p.y); 
+        };
+        const move = (e) => { 
+          if (!drawing) return; 
+          const p = getPos(e); 
+          ctx.lineTo(p.x, p.y); 
+          ctx.stroke(); 
+        };
         const end = () => { drawing = false; };
 
         canvas.addEventListener('mousedown', start);
         canvas.addEventListener('mousemove', move);
         canvas.addEventListener('mouseup', end);
         canvas.addEventListener('mouseleave', end);
+        canvas.addEventListener('touchstart', () => { console.log('🖊️ Touch commencé'); }, { passive: true });
         canvas.addEventListener('touchstart', start, { passive: true });
         canvas.addEventListener('touchmove', move, { passive: true });
         canvas.addEventListener('touchend', end);
@@ -86,10 +113,13 @@
           console.log('🔍 SignPage - Logs init échoués', e?.message);
         }
 
-        const token = q('token');
-        const devisId = q('devisId');
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+        const devisId = params.get('devisId');
         try {
-          console.log('🔍 SignPage - Params extraits:', { devisId, token });
+          console.log('📋 PARAMS EXTRAITS:');
+          console.log('📋 devisId:', devisId);
+          console.log('📋 token:', token);
         } catch {}
         const infoBox = document.getElementById('info');
         const errorBox = document.getElementById('error');
@@ -122,6 +152,7 @@
 
         document.getElementById('btnClear').addEventListener('click', clearSignature);
         document.getElementById('btnSign').addEventListener('click', async () => {
+          try { console.log('🖊️ CLICK sur bouton Signer !'); } catch {}
           errorBox.style.display = 'none';
           successBox.style.display = 'none';
 
@@ -136,6 +167,10 @@
           const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
           let hasInk = false;
           for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] !== 0) { hasInk = true; break; } }
+          try { 
+            console.log('🖊️ Canvas signature:', { width: canvas.width, height: canvas.height }); 
+            console.log('🖊️ Canvas est vide?', !hasInk);
+          } catch {}
           if (!hasInk) {
             errorBox.textContent = 'Veuillez signer dans la zone prévue.';
             errorBox.style.display = 'block';
@@ -144,7 +179,9 @@
 
           const dataUrl = canvas.toDataURL('image/png');
           try {
+            try { console.log('🖊️ Envoi à API:', { devisId, token, hasName: !!name, dataUrlLength: dataUrl?.length }); } catch {}
             const r = await postJSON('sign-devis', { action: 'sign', token, name, signatureDataUrl: dataUrl });
+            try { console.log('🖊️ Réponse API:', r); } catch {}
             if (r.ok) {
               successBox.textContent = 'Merci, votre devis est signé.';
               successBox.style.display = 'block';
@@ -155,6 +192,7 @@
               errorBox.style.display = 'block';
             }
           } catch (e) {
+            try { console.log('🖊️ ERREUR API:', e); } catch {}
             errorBox.textContent = 'Erreur lors de la signature. Réessayez plus tard.';
             errorBox.style.display = 'block';
           }
