@@ -1,0 +1,43 @@
+═══════════════════════════════════════════════════════════════════
+  🚀 COMMANDES FINALES - ARTISANFLOW v1.0.1
+═══════════════════════════════════════════════════════════════════
+
+COPIE-COLLE CES COMMANDES UNE PAR UNE :
+
+═══════════════════════════════════════════════════════════════════
+
+# 1. STAGER LES FICHIERS MODIFIÉS
+git add app.json eas.json .npmrc screens/CaptureHubScreen.js screens/ProjectDetailScreen.js jest.config.js jest.mocks.js jest.setup.js tests/test_rls_security.js utils/ai_quote_generator_improved.js
+
+# 2. COMMIT LOCAL (PAS DE PUSH)
+git commit -m "v1.0.1 - Stabilisation + corrections UX + fix safe area"
+
+# 3. VÉRIFIER LE COMMIT
+git log -1 --oneline
+
+# 4. BUILD PRODUCTION
+npx eas build --platform android --profile production --clear-cache
+
+═══════════════════════════════════════════════════════════════════
+
+⏱️  DURÉE BUILD : 15-20 minutes
+
+📥 APRÈS LE BUILD :
+   → Télécharger l'AAB depuis EAS Dashboard
+   → https://expo.dev/accounts/chriskreepz/projects/artisanflow-3rgvrambzo0tk8d1ddx2/builds
+
+📤 UPLOAD PLAY CONSOLE :
+   → https://play.google.com/console
+   → ArtisanFlow → Test → Test fermé → Créer une version
+
+📝 NOTES DE VERSION :
+   - Amélioration de la stabilité générale
+   - Correction de l'affichage sur l'écran Capture
+   - Optimisation de la transcription IA et génération de devis
+
+═══════════════════════════════════════════════════════════════════
+
+✅ LE COMMIT RESTE LOCAL (PAS DE PUSH)
+
+═══════════════════════════════════════════════════════════════════
+

@@ -1,0 +1,78 @@
+═══════════════════════════════════════════════════════════════
+  INSTRUCTIONS SUPABASE POUR L'IA DEVIS AUTOMATIQUE
+═══════════════════════════════════════════════════════════════
+
+🔄 ÉTAPE 1 : OUV with SUPABASE
+───────────────────────────────────────────────────────────────
+1. Aller sur : https://supabase.com/dashboard
+2. Connecter-vous
+3. Sélectionner votre projet ArtisanFlow
+
+🔍 ÉTAPE 2 : CHOISIR LE BON SCRIPT
+───────────────────────────────────────────────────────────────
+
+⚡ OPTION A : Si vous VOULEZ CONSERVER vos données existantes
+─────────────────────────────────────────────────────────────
+→ Ouvrir le fichier : FIX_NOTES_CLIENT_ID.sql
+→ Copier TOUT le contenu
+→ Coller dans Supabase SQL Editor
+→ Cliquer "RUN"
+
+✅ AVANTAGES :
+- Garde tous vos clients, projets, photos existants
+- Ajoute juste la colonne client_id manquante
+- Migration sans risque
+
+⚠️ OPTION B : Si vous VOULEZ TOUT RECRÉER (base neuve)
+───────────────────────────────────────────────────────────
+→ Ouvrir le fichier : INIT_SUPABASE.sql
+→ Copier TOUT le contenu
+→ Coller dans Supabase SQL Editor
+→ Cliquer "RUN"
+
+⚠️ ATTENTION :
+- SUPPRIME toutes vos données actuelles !
+- Recrée les tables avec la bonne structure
+- Partir de zéro
+
+🎯 ÉTAPE 3 : VÉRIFIER LE RÉSULTAT
+───────────────────────────────────────────────────────────────
+Après avoir cliqué "RUN", vous devriez voir :
+✅ "✅ Migration terminée!" (pour Option A)
+OU
+✅ "✅ Initialisation complète ! Tables et Storage configurés." (pour Option B)
+
+🔄 ÉTAPE 4 : REDÉMARRER L'APP
+───────────────────────────────────────────────────────────────
+Dans votre terminal Expo :
+1. Arrêter le serveur (Ctrl+C)
+2. Relancer : npx expo start --clear
+3. Tester l'app !
+
+🧪 ÉTAPE 5 : TESTER L'IA
+───────────────────────────────────────────────────────────────
+1. Ouvrir un chantier existant
+2. Cliquer "🎙️ Enregistrer"
+3. Parler en anglais : "Replace 8 outlets, 2 switches, 6 hours"
+4. Cliquer "☁️ Envoyer"
+5. ✅ UN DEVIS devrait se créer automatiquement !
+
+═══════════════════════════════════════════════════════════════
+  EN CAS DE PROBLÈME
+═══════════════════════════════════════════════════════════════
+
+❌ Erreur : "relation 'notes' does not exist"
+→ Utiliser INIT_SUPABASE.sql (Option B)
+
+❌ Erreur : "column client_id does not exist"
+→ Utiliser FIX_NOTES_CLIENT_ID.sql (Option A)
+
+❌ Erreur : "duplicate key value violates unique constraint"
+→ Normal si vous avez déjà des devis, l'app créera des numéros uniques
+
+❌ L'app ne lance plus après modification
+→ Arrêter : Ctrl+C
+→ Relancer : npx expo start --clear
+
+═══════════════════════════════════════════════════════════════
+

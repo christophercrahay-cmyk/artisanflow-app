@@ -1,439 +1,185 @@
 import 'react-native-gesture-handler';
-import VoiceRecorder from './VoiceRecorder';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  FlatList,
-} from 'react-native';
-import PagerView from 'react-native-pager-view';
-import { Picker } from '@react-native-picker/picker';
+import React, { useState, useEffect } from 'react';
+import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import { View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AppNavigator from './navigation/AppNavigator';
+import AuthScreen from './screens/AuthScreen';
+import OnboardingScreen, { useOnboarding } from './screens/OnboardingScreen';
+import ErrorBoundary from './components/ErrorBoundary';
+import NetworkStatusBar from './components/NetworkStatusBar';
+import OfflineIndicator from './components/OfflineIndicator';
+import SplashScreen from './components/SplashScreen';
+import { useSafeTheme } from './theme/useSafeTheme';
+import { onAuthStateChange, getCurrentSession } from './utils/auth';
+import { initSentry } from './utils/sentryInit';
+import logger from './utils/logger';
+import { OfflineManager } from './utils/offlineManager';
 import { supabase } from './supabaseClient';
+import { initRevenueCat } from './services/payments/revenuecat';
 
-/* ===================== ÉCRAN CLIENTS ===================== */
-function ClientsScreen() {
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [clients, setClients] = useState([]);
-  const [loading, setLoading] = useState(false);
+// Initialiser Sentry dès le démarrage
+initSentry();
 
-  const loadClients = async () => {
-    const { data, error } = await supabase
-      .from('clients')
-      .select('id,name,phone,email,created_at')
-      .order('created_at', { ascending: false });
-    if (!error) setClients(data || []);
-  };
+// 🔍 DIAGNOSTIC SUPABASE (à retirer après tests)
+console.log('🔍 === DIAGNOSTIC SUPABASE ===');
+console.log('Supabase URL:', supabase.supabaseUrl);
+console.log('Supabase Key (10 premiers chars):', `${supabase.supabaseKey?.substring(0, 10)  }...`);
+console.log('=================================');
 
+// Thème personnalisé pour NavigationContainer
+const CustomDarkTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: '#0F1115',
+    card: '#1A1D22',
+    border: '#2A2E35',
+    text: '#F9FAFB', // Couleur unifiée
+    primary: '#1D4ED8', // Bleu principal unifié
+    notification: '#1D4ED8',
+  },
+};
+
+export default function App() {
+  const theme = useSafeTheme();
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
+  const { isLoading: onboardingLoading, showOnboarding, completeOnboarding } = useOnboarding();
+
+  // Vérifier session au démarrage (une seule fois)
   useEffect(() => {
-    loadClients();
-  }, []);
-
-  const addClient = async () => {
-    if (!name.trim()) {
-      return Alert.alert('Nom requis', 'Le champ nom est obligatoire.');
-    }
-    try {
-      setLoading(true);
-      const { error } = await supabase.from('clients').insert([
-        {
-          name: name.trim(),
-          phone: phone.trim() || null,
-          email: email.trim() || null,
-        },
-      ]);
-      if (error) throw error;
-      setName('');
-      setPhone('');
-      setEmail('');
-      await loadClients();
-      Alert.alert('OK', 'Client ajouté ✅');
-    } catch (e) {
-      Alert.alert('Erreur', e.message || 'Insertion impossible');
-    } finally {
+    let isMounted = true;
+    
+    getCurrentSession().then((initialSession) => {
+      if (!isMounted) {return;}
+      
+      logger.info('App', `Session initiale: ${initialSession ? 'connecté' : 'non connecté'}`);
+      setSession(initialSession);
       setLoading(false);
-    }
-  };
-
-  const deleteClient = async (id) => {
-    Alert.alert('Confirmer', 'Supprimer ce client ?', [
-      { text: 'Annuler', style: 'cancel' },
-      {
-        text: 'Supprimer',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase.from('clients').delete().eq('id', id);
-          if (!error) loadClients();
-        },
-      },
-    ]);
-  };
-
-  const renderClient = ({ item }) => (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>{item.name}</Text>
-      {item.phone ? <Text style={styles.cardLine}>{item.phone}</Text> : null}
-      {item.email ? <Text style={styles.cardLine}>{item.email}</Text> : null}
-      <TouchableOpacity
-        onPress={() => deleteClient(item.id)}
-        style={styles.deleteButton}
-      >
-        <Text style={styles.deleteText}>🗑️ Supprimer</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const headerForm = (
-    <View style={{ paddingHorizontal: 20, paddingTop: 60, backgroundColor: '#fff' }}>
-      <Text style={styles.title}>ArtisanFlow – Clients</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Nom *"
-        value={name}
-        onChangeText={setName}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Téléphone"
-        keyboardType="phone-pad"
-        value={phone}
-        onChangeText={setPhone}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        keyboardType="email-address"
-        autoCapitalize="none"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TouchableOpacity
-        style={[styles.button, loading && { opacity: 0.6 }]}
-        onPress={addClient}
-        disabled={loading}
-      >
-        <Text style={styles.buttonText}>
-          {loading ? 'Ajout…' : 'AJOUTER LE CLIENT'}
-        </Text>
-      </TouchableOpacity>
-      <Text style={styles.helper}>Liste des clients</Text>
-    </View>
-  );
-
-  return (
-    <FlatList
-      nestedScrollEnabled
-      data={clients}
-      keyExtractor={(it) => String(it.id)}
-
-      renderItem={renderClient}
-      ListHeaderComponent={headerForm}
-      contentContainerStyle={{ paddingBottom: 40, backgroundColor: '#fff' }}
-    />
-  );
-}
-
-/* ===================== ÉCRAN CHANTIERS ===================== */
-function ProjectsScreen() {
-  const [projectName, setProjectName] = useState('');
-  const [address, setAddress] = useState('');
-  const [status, setStatus] = useState('active'); // valeurs: active | paused | done
-  const [clientId, setClientId] = useState(null);
-
-  const [clientsOptions, setClientsOptions] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const loadClients = async () => {
-    const { data, error } = await supabase
-      .from('clients')
-      .select('id,name')
-      .order('name', { ascending: true });
-    if (!error) {
-      setClientsOptions(data || []);
-      if (!clientId && data && data.length) setClientId(data[0].id);
-    }
-  };
-
-  // Récupère TOUTES les colonnes + nom client → évite l’erreur status/status_text
-  const loadProjects = async () => {
-    const { data, error } = await supabase
-      .from('projects')
-      .select('*, clients(name)')
-      .order('created_at', { ascending: false });
-    if (!error) setProjects(data || []);
-  };
-
-  useEffect(() => {
-    (async () => {
-      await loadClients();
-      await loadProjects();
-    })();
-  }, []);
-
-  const addProject = async () => {
-    if (!projectName.trim())
-      return Alert.alert('Nom requis', 'Le nom du chantier est obligatoire.');
-    if (!clientId) return Alert.alert('Client requis', 'Sélectionne un client.');
-
-    try {
-      setLoading(true);
-
-      // 1) essai avec status_text
-      let { error } = await supabase.from('projects').insert([
-        {
-          name: projectName.trim(),
-          address: address.trim() || null,
-          client_id: clientId,
-          status_text: status || 'active',
-        },
-      ]);
-
-      // 2) si la colonne n’existe pas, on retente avec "status"
-      if (error && String(error.message).includes('status_text')) {
-        const retry = await supabase.from('projects').insert([
-          {
-            name: projectName.trim(),
-            address: address.trim() || null,
-            client_id: clientId,
-            status: status || 'active',
-          },
-        ]);
-        error = retry.error;
+      
+      // Si connecté, traiter la queue d'uploads au démarrage
+      if (initialSession) {
+        setTimeout(() => {
+          OfflineManager.processQueue(supabase).then((result) => {
+            if (result.processed > 0) {
+              logger.success('App', `${result.processed} upload(s) synchronisé(s)`);
+            }
+          });
+        }, 2000); // Attendre 2s que l'app soit prête
+        
+        // Initialiser RevenueCat après connexion (non-bloquant)
+        if (initialSession.user?.id) {
+          initRevenueCat(initialSession.user.id).catch((err) => {
+            logger.error('App', 'Erreur init RevenueCat (non-bloquant)', err);
+            
+            // ✅ Mode graceful : app continue de fonctionner
+            // Les features seront accessibles (mode essai étendu temporaire)
+            if (__DEV__) {
+              Alert.alert(
+                '⚠️ Erreur de connexion',
+                'Impossible de vérifier votre abonnement. Vous pouvez continuer à utiliser l\'app normalement.\n\nErreur: ' + (err?.message || 'Inconnue'),
+                [{ text: 'OK' }]
+              );
+            }
+          });
+        }
       }
+    });
 
-      if (error) throw error;
+    return () => {
+      isMounted = false;
+    };
+  }, []); // Exécuté une seule fois au montage
 
-      setProjectName('');
-      setAddress('');
-      await loadProjects();
-      Alert.alert('OK', 'Chantier ajouté ✅');
-    } catch (e) {
-      Alert.alert('Erreur', e.message || 'Insertion impossible');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Écouter changements auth (une seule fois)
+  useEffect(() => {
+    const { data: { subscription } } = onAuthStateChange((event, newSession) => {
+      logger.info('App', `Auth event: ${event}`);
+      setSession(newSession);
+      
+      // Traiter la queue quand l'utilisateur se connecte
+      if (newSession && event === 'SIGNED_IN') {
+        setTimeout(() => {
+          OfflineManager.processQueue(supabase);
+        }, 2000);
+        
+        // Initialiser RevenueCat après connexion
+        if (newSession.user?.id) {
+          initRevenueCat(newSession.user.id).catch((err) => {
+            if (__DEV__) {
+              logger.error('App', 'Erreur init RevenueCat', err);
+            }
+          });
+        }
+      }
+    });
 
-  const deleteProject = async (id) => {
-    Alert.alert('Confirmer', 'Supprimer ce chantier ?', [
-      { text: 'Annuler', style: 'cancel' },
-      {
-        text: 'Supprimer',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase.from('projects').delete().eq('id', id);
-          if (!error) loadProjects();
-        },
-      },
-    ]);
-  };
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []); // Exécuté une seule fois au montage
 
-  const renderProject = ({ item }) => {
-    const statusValue = item.status_text ?? item.status ?? '—';
+  // Vérifier le réseau périodiquement et traiter la queue
+  useEffect(() => {
+    const networkInterval = setInterval(async () => {
+      const currentSession = await getCurrentSession(); // Récupérer la session actuelle
+      const isOnline = await OfflineManager.isOnline();
+      if (isOnline && currentSession) {
+        const queue = await OfflineManager.getQueue();
+        if (queue.length > 0) {
+          OfflineManager.processQueue(supabase);
+        }
+      }
+    }, 10000); // Toutes les 10 secondes
+
+    return () => {
+      clearInterval(networkInterval);
+    };
+  }, []); // Exécuté une seule fois au montage
+
+  // ✅ Afficher le SplashScreen animé au démarrage
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
+  if (loading || onboardingLoading) {
     return (
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>{item.name}</Text>
-        <Text style={styles.cardLine}>{item.address || '—'}</Text>
-        <Text style={styles.cardLine}>Client : {item.clients?.name || '—'}</Text>
-        <Text style={styles.cardLine}>Statut : {statusValue}</Text>
-        {/* --- Bloc de note vocale lié à ce chantier --- */}
-        <View style={{ marginTop: 10 }}>
-          <VoiceRecorder projectId={item.id} />
-        </View>
-
-        <TouchableOpacity
-          onPress={() => deleteProject(item.id)}
-          style={styles.deleteButton}
-        >
-          <Text style={styles.deleteText}>🗑️ Supprimer</Text>
-        </TouchableOpacity>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator size="large" color={theme.colors.accent} />
       </View>
     );
-  };
-  
+  }
 
-  const headerForm = (
-    <View style={{ paddingHorizontal: 20, paddingTop: 60, backgroundColor: '#fff' }}>
-      <Text style={styles.title}>Chantiers</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Nom du chantier *"
-        value={projectName}
-        onChangeText={setProjectName}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Adresse"
-        value={address}
-        onChangeText={setAddress}
-      />
-
-      <View style={styles.pickerBox}>
-        <Text style={styles.pickerLabel}>Client</Text>
-        <Picker selectedValue={clientId} onValueChange={(v) => setClientId(v)}>
-          {clientsOptions.map((c) => (
-            <Picker.Item key={c.id} label={c.name} value={c.id} />
-          ))}
-        </Picker>
-      </View>
-
-      <View style={styles.pickerBox}>
-        <Text style={styles.pickerLabel}>Statut</Text>
-        <Picker selectedValue={status} onValueChange={(v) => setStatus(v)}>
-          <Picker.Item label="Actif" value="active" />
-          <Picker.Item label="En pause" value="paused" />
-          <Picker.Item label="Terminé" value="done" />
-        </Picker>
-      </View>
-
-      <TouchableOpacity
-        style={[styles.button, loading && { opacity: 0.6 }]}
-        onPress={addProject}
-        disabled={loading}
-      >
-        <Text style={styles.buttonText}>
-          {loading ? 'Ajout…' : 'AJOUTER LE CHANTIER'}
-        </Text>
-      </TouchableOpacity>
-
-      <Text style={styles.helper}>Liste des chantiers</Text>
-    </View>
-  );
+  // Afficher l'onboarding au premier lancement (après connexion)
+  if (session && showOnboarding) {
+    return (
+      <ErrorBoundary>
+        <SafeAreaProvider>
+          <OnboardingScreen onComplete={completeOnboarding} />
+        </SafeAreaProvider>
+      </ErrorBoundary>
+    );
+  }
 
   return (
-    <FlatList
-      nestedScrollEnabled
-      data={projects}
-      keyExtractor={(it) => it.id}
-      renderItem={renderProject}
-      ListHeaderComponent={headerForm}
-      contentContainerStyle={{ paddingBottom: 40, backgroundColor: '#fff' }}
-    />
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <NavigationContainer theme={CustomDarkTheme}>
+          {session ? <AppNavigator /> : <AuthScreen />}
+          <NetworkStatusBar />
+          <OfflineIndicator />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 
-/* ===================== APP (SWIPE) ===================== */
-export default function App() {
-  const pagerRef = useRef(null);
-  const [page, setPage] = useState(0);
-  const goTo = (i) => {
-    setPage(i);
-    pagerRef.current?.setPage(i);
-  };
-
-  return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => goTo(0)}
-          style={[styles.tabBtn, page === 0 && styles.tabBtnActive]}
-        >
-          <Text style={[styles.tabBtnText, page === 0 && styles.tabBtnTextActive]}>
-            Clients
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => goTo(1)}
-          style={[styles.tabBtn, page === 1 && styles.tabBtnActive]}
-        >
-          <Text style={[styles.tabBtnText, page === 1 && styles.tabBtnTextActive]}>
-            Chantiers
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <PagerView
-        style={{ flex: 1 }}
-        initialPage={0}
-        ref={pagerRef}
-        onPageSelected={(e) => setPage(e.nativeEvent.position)}
-      >
-        <View key="clients">
-          <ClientsScreen />
-        </View>
-        <View key="projects">
-          <ProjectsScreen />
-        </View>
-      </PagerView>
-    </View>
-  );
-}
-
-/* ===================== STYLES ===================== */
 const styles = StyleSheet.create({
-  title: { fontSize: 26, fontWeight: '800', marginBottom: 16 },
-  input: {
-    height: 54,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    marginBottom: 12,
-    backgroundColor: '#fff',
-  },
-  button: {
-    height: 54,
-    backgroundColor: '#3B82F6',
-    borderRadius: 10,
-    alignItems: 'center',
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
-    marginTop: 6,
+    alignItems: 'center',
   },
-  buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  helper: { textAlign: 'left', marginTop: 14, marginBottom: 10, color: '#666' },
-
-  pickerBox: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  pickerLabel: { paddingHorizontal: 12, paddingTop: 8, color: '#666', fontSize: 12 },
-
-  card: {
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    padding: 12,
-    marginHorizontal: 20,
-    marginBottom: 10,
-    backgroundColor: '#fff',
-  },
-  cardTitle: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  cardLine: { color: '#444', marginBottom: 2 },
-  deleteButton: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 8,
-  },
-  deleteText: { color: '#b91c1c', fontWeight: '700' },
-
-  header: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 8,
-    backgroundColor: '#fff',
-  },
-  tabBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: '#f3f4f6',
-  },
-  tabBtnActive: { backgroundColor: '#DBEAFE' },
-  tabBtnText: { fontWeight: '700', color: '#374151' },
-  tabBtnTextActive: { color: '#1D4ED8' },
 });

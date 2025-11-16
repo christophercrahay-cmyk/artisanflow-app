@@ -1,0 +1,219 @@
+# RÈGLES CURSOR – PROJET ARTISANFLOW
+
+Tu travailles EXCLUSIVEMENT sur le projet mobile React Native **ArtisanFlow**.
+
+---
+
+## 1. CONTEXTE PROJET
+
+ArtisanFlow utilise :
+- React Native + Expo
+- Supabase (avec RLS activé)
+- Zustand
+- IA de génération de devis (Whisper + GPT-4o-mini)
+- Gestion des chantiers / clients / photos / vocaux
+
+Tu NE DOIS PAS mélanger avec d'autres projets (ex : Tredora).  
+Si une demande ressemble à un autre projet (web, Vinted, ISBN, etc.), tu dois demander :
+> « Est-ce bien pour ArtisanFlow ? »
+
+---
+
+## 2. DONNÉES UTILISATEURS (MULTI-TENANT)
+
+### Principe absolu
+> Chaque artisan ne voit QUE ses propres données. JAMAIS celles d'un autre.
+
+### Règles Supabase
+
+Les requêtes sur les tables liées aux données d'un utilisateur doivent **toujours filtrer par utilisateur** (ex : `user_id`).
+
+Tu dois **signaler et corriger** toute requête du type `.select('*')` **sans filtre utilisateur** sur des données sensibles.
+
+**Exemple :**
+
+```javascript
+// ✅ OK
+const { data } = await supabase
+  .from('projects')
+  .select('*')
+  .eq('user_id', userId);
+
+// ⚠️ À SIGNALER / CORRIGER
+const { data } = await supabase
+  .from('projects')
+  .select('*'); // ← Manque le filtre user_id
+```
+
+### Tables concernées (12 tables)
+
+`profiles`, `brand_settings`, `clients`, `projects`, `devis`, `devis_lignes`, `factures`, `notes`, `project_photos`, `client_photos`, `devis_ai_sessions`, `devis_temp_ai`, `user_price_stats`
+
+### RLS (Row Level Security)
+
+- ✅ Activé sur toutes les tables
+- Les policies filtrent par `auth.uid()`
+- ❌ **Ne JAMAIS désactiver RLS**, même temporairement
+
+### En cas de doute
+
+**STOP et demande confirmation** avant de modifier quoi que ce soit qui touche aux requêtes utilisateurs.
+
+---
+
+## 3. CLÉS, SECRETS ET ENV
+
+### Tu PEUX utiliser côté client
+
+```javascript
+EXPO_PUBLIC_SUPABASE_URL
+EXPO_PUBLIC_SUPABASE_ANON_KEY
+```
+
+Privilégie les variables d'environnement (`process.env.EXPO_PUBLIC_*`) et un fichier de config (ex : `config/supabase.js`).
+
+### Tu NE DOIS PAS
+
+- Introduire de vraies clés secrètes côté client (service role, Stripe secret, admin, etc.)
+- Proposer de mettre une clé sensible directement dans le code
+
+### Si tu vois une clé sensible dans le code
+
+1. **Signale-la**
+2. **Propose de la déplacer côté serveur** (Edge function, backend, Make, etc.)
+
+---
+
+## 4. MÉTHODE DE TRAVAIL
+
+### Avant de modifier du code, tu dois
+
+1. **Lire** le code existant
+2. **Expliquer** en français ce qu'il fait
+3. **Proposer** clairement le changement
+4. **Expliquer** comment tester
+
+### Format conseillé
+
+```
+📁 Fichiers concernés : ...
+🔍 Problème identifié : ...
+✅ Solution proposée : ...
+🧪 Comment tester : ...
+```
+
+---
+
+## 5. LIMITES
+
+Tu évites autant que possible :
+- Les gros refactors non demandés
+- De toucher à plusieurs zones sans lien dans une seule passe
+- De modifier les règles RLS / policies Supabase sans expliquer clairement l'impact
+
+Si la demande est floue (ex : « optimise tout ça »), tu commences par un **diagnostic** puis tu proposes des **petites étapes**, pas un bulldozer.
+
+---
+
+## 6. ANTI-PATTERNS INTERDITS
+
+Tu NE DOIS JAMAIS :
+- ❌ Supprimer du code sans être certain qu'il est inutilisé
+- ❌ Désactiver RLS même temporairement (« juste pour tester »)
+- ❌ Faire plusieurs changements non liés en une seule passe
+- ❌ Copier-coller sans comprendre
+- ❌ Proposer des changements cosmétiques non demandés
+- ❌ Créer des requêtes sans filtre `user_id` sur des données utilisateurs
+
+---
+
+## 7. AVANT DE VALIDER
+
+### Vérifications obligatoires
+
+- ✅ Pas d'erreurs de lint
+- ✅ Tester l'isolation utilisateurs (créer 2 comptes test et vérifier qu'un artisan ne voit pas les données de l'autre)
+- ✅ Tester les cas limites (offline, erreurs réseau, timeouts)
+- ✅ Tester sur device réel si possible (Android/iOS)
+
+### Tests manuels recommandés
+
+```bash
+npm run lint        # Vérifier le code
+npm test            # Lancer les tests
+npm run format      # Formater le code
+```
+
+---
+
+## 8. ARCHITECTURE DU PROJET
+
+### Structure des dossiers
+
+```
+artisanflow/
+├── components/          # Composants réutilisables
+├── screens/             # Écrans de l'app
+├── services/            # Services API (requêtes Supabase, IA, etc.)
+├── navigation/          # Navigation React Navigation
+├── store/               # State management Zustand
+├── theme/               # Thème centralisé
+├── utils/               # Utilitaires
+├── hooks/               # Hooks personnalisés
+├── validation/          # Validation Zod
+├── sql/                 # Scripts SQL
+├── supabase/functions/  # Edge Functions
+└── config/              # Configuration (Supabase, etc.)
+```
+
+### Fichiers sensibles à surveiller
+
+- Tous les fichiers dans `/services/` (requêtes Supabase)
+- Tous les fichiers dans `/screens/` (affichage données users)
+- Les composants qui affichent des listes (clients, chantiers, etc.)
+
+---
+
+## 9. CONVENTIONS DE CODE
+
+### Naming
+
+- Composants : `PascalCase.js`
+- Hooks : `useCamelCase.js`
+- Utils : `camelCase.js`
+- Constants : `UPPER_SNAKE_CASE`
+
+### Imports (ordre recommandé)
+
+```javascript
+// 1. React
+import React, { useState, useEffect } from 'react';
+
+// 2. React Native
+import { View, Text, TouchableOpacity } from 'react-native';
+
+// 3. Libraries
+import { Feather } from '@expo/vector-icons';
+
+// 4. Local
+import { supabase } from '../supabaseClient';
+import { useSafeTheme } from '../theme/useSafeTheme';
+```
+
+---
+
+## 10. EN RÉSUMÉ
+
+1. **Lire avant de modifier**
+2. **Un changement à la fois**
+3. **Isolation utilisateurs = SACRÉ**
+4. **Expliquer en français**
+5. **Tester avant de valider**
+
+**Ces règles sont permanentes et non-négociables.**
+
+---
+
+**Version** : 1.3.0  
+**Dernière mise à jour** : 10 Novembre 2025
+

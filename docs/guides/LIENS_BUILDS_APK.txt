@@ -1,0 +1,56 @@
+===============================================
+BUILDS DISPONIBLES - ARTISANFLOW
+Date: 03/11/2025
+===============================================
+
+✅ APK PREVIEW (Test de l'application)
+===============================================
+Lien: https://expo.dev/artifacts/eas/6gpvjCHzpJKTe9fJvhMVyt.apk
+ID:   2aa455ed-5b23-482a-bc04-4b252c9b9477
+Date: 02/11/2025 15:45:49
+Usage: Tester l'app sur téléphone Android
+
+✅ APK DEVELOPMENT (Debug)
+===============================================
+Lien: https://expo.dev/artifacts/eas/dMmGUCRwdEia5cTBkSmiYC.apk
+ID:   6782e4c7-431e-45e7-8e44-fb2873739098
+Date: 02/11/2025 14:08:30
+Usage: Debug et développement
+
+✅ AAB PRODUCTION (Google Play Store)
+===============================================
+Lien: https://expo.dev/artifacts/eas/d3e4SFX9DVEeQFZRLny6bN.aab
+ID:   617d3443-9c44-42cb-8475-4c32c62fd6b6
+Date: 02/11/2025 20:37:11
+Usage: Upload sur Google Play Console
+
+===============================================
+INSTRUCTIONS TELECHARGEMENT
+===============================================
+
+Methode 1: Navigateur
+- Cliquer sur le lien ci-dessus
+- Télécharger le fichier
+- Sur téléphone: Activer "Sources inconnues"
+- Installer l'APK
+
+Methode 2: Commande CLI
+npx eas-cli build:download
+
+Methode 3: Dashboard Expo
+https://expo.dev/accounts/chriskreepz/projects/artisanflow-3rgvrambzo0tk8d1ddx2/builds
+
+===============================================
+Lancer un nouveau build
+===============================================
+
+Si tu veux générer un nouveau build (code modifié):
+
+npx eas-cli build --platform android --profile preview
+
+Répondre "yes" aux prompts pour créer le keystore.
+
+===============================================
+
+Guide complet: GUIDE_BUILD_APK_CLOUD.md
+

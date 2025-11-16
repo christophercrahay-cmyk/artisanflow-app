@@ -1,0 +1,83 @@
+# ============================================
+# .easignore - Exclure fichiers inutiles du build
+# ============================================
+# Réduit l'archive de 473 MB → ~50 MB !
+# ============================================
+
+# Documentation
+*.md
+docs/
+coverage/
+
+# Fichiers temporaires
+*.log
+*.tmp
+*.cache
+.DS_Store
+Thumbs.db
+
+# Tests
+__tests__/
+**/*.test.js
+**/*.test.ts
+**/*.spec.js
+**/*.spec.ts
+jest.config.js
+jest.setup.js
+jest.mocks.js
+
+# Backups
+backup/
+android_backup/
+*.zip
+*.bak
+
+# Build artifacts (seront recréés)
+dist/
+build/
+.expo/
+.eas/
+
+# Scripts non utilisés en build
+scripts/
+
+# Android/iOS natifs (gérés par EAS)
+android/
+ios/
+
+# SQL scripts (déjà déployés sur Supabase)
+sql/
+
+# Tests et QA
+tests/
+test/
+
+# Archives d'export
+*_Export.zip
+*_SourceCode_Only.zip
+
+# Fichiers de développement
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Fichiers Windows
+desktop.ini
+$RECYCLE.BIN/
+
+# Large files non nécessaires
+*.aab
+*.apk
+*.ipa
+
+
+
+
+
+
+
+
+
+

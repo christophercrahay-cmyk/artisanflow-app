@@ -22,7 +22,7 @@ export default function VoiceRecorder({ projectId }) {
       if (perm !== 'granted') {
         const { status } = await Audio.requestPermissionsAsync();
         setPerm(status);
-        if (status !== 'granted') return;
+        if (status !== 'granted') {return;}
       }
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -46,13 +46,13 @@ export default function VoiceRecorder({ projectId }) {
   const stop = async () => {
     try {
       const rec = recRef.current;
-      if (!rec) return;
+      if (!rec) {return;}
       await rec.stopAndUnloadAsync();
       const uri = rec.getURI();
       setIsRec(false);
       recRef.current = null;
 
-      if (!uri) return Alert.alert('Erreur', 'Aucun fichier audio généré.');
+      if (!uri) {return Alert.alert('Erreur', 'Aucun fichier audio généré.');}
 
       setIsUploading(true);
       // Convertir en Blob et envoyer au Storage
@@ -65,14 +65,14 @@ export default function VoiceRecorder({ projectId }) {
         .from('voices')
         .upload(fileName, blob, { contentType: 'audio/m4a', upsert: true });
 
-      if (upErr) throw upErr;
+      if (upErr) {throw upErr;}
 
       // Enregistrer la note dans la table notes
       const { error: insErr } = await supabase
         .from('notes')
         .insert([{ project_id: projectId, file_path: fileName }]);
 
-      if (insErr) throw insErr;
+      if (insErr) {throw insErr;}
 
       Alert.alert('OK', 'Note vocale enregistrée ✅');
     } catch (e) {
