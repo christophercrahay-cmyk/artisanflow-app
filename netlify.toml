@@ -1,7 +1,7 @@
 [build]
-  base = "web/signature"
+  # On force le build depuis la racine pour éviter tout override UI.
+  command = "npm install --prefix web/signature && npm run --prefix web/signature build"
   publish = "web/signature/dist"
-  command = "npm ci && npm run build"
 
 [[redirects]]
   from = "/*"
