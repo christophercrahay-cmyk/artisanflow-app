@@ -33,7 +33,7 @@ export const SignatureBox = React.forwardRef<SignatureCanvasHandle, Props>(funct
 	return (
 		<div className="sig-wrapper">
 			<SignatureCanvas
-				ref={(r) => (sigRef.current = r)}
+				ref={(r: SignatureCanvas | null) => (sigRef.current = r)}
 				penColor="#111827"
 				backgroundColor="#ffffff"
 				minWidth={0.8}
