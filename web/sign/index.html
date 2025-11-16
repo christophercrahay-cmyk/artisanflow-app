@@ -156,7 +156,8 @@
           errorBox.style.display = 'none';
           successBox.style.display = 'none';
 
-          const name = (document.getElementById('fullName') as HTMLInputElement).value.trim();
+          const nameInput = document.getElementById('fullName');
+          const name = nameInput ? nameInput.value.trim() : '';
           if (!name) {
             errorBox.textContent = 'Veuillez saisir votre nom complet.';
             errorBox.style.display = 'block';
