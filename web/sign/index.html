@@ -131,7 +131,7 @@
         }
 
         try {
-          const res = await postJSON('sign-devis', { action: 'info', token });
+          const res = await postJSON('sign-devis', { action: 'info', devisId, token });
           if (!res.ok) {
             const reasons = { expired: 'Lien expiré', used: 'Lien déjà utilisé', not_found: 'Lien introuvable' };
             errorBox.textContent = reasons[res.reason] || 'Lien invalide';
@@ -181,7 +181,7 @@
           const dataUrl = canvas.toDataURL('image/png');
           try {
             try { console.log('🖊️ Envoi à API:', { devisId, token, hasName: !!name, dataUrlLength: dataUrl?.length }); } catch {}
-            const r = await postJSON('sign-devis', { action: 'sign', token, name, signatureDataUrl: dataUrl });
+            const r = await postJSON('sign-devis', { action: 'sign', devisId, token, name, signatureDataUrl: dataUrl });
             try { console.log('🖊️ Réponse API:', r); } catch {}
             if (r.ok) {
               successBox.textContent = 'Merci, votre devis est signé.';
