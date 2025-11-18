@@ -9,10 +9,10 @@ export const metadata: Metadata = {
 
 export default function MentionsLegalesPage() {
   return (
-    <div className="min-h-screen bg-white py-16 md:py-24">
+    <div className="min-h-screen bg-white py-16 md:py-24 lg:py-32">
       <Container>
         <AnimatedSection>
-          <div className="max-w-4xl mx-auto prose prose-slate">
+          <div className="max-w-4xl mx-auto px-4 prose prose-slate prose-lg max-w-none">
             <h1 className="text-4xl font-bold text-slate-900 mb-8">
               Mentions légales
             </h1>
@@ -26,10 +26,9 @@ export default function MentionsLegalesPage() {
               </p>
               <ul className="list-disc list-inside text-slate-700 space-y-2">
                 <li>Raison sociale : SASU À Contre Courant</li>
-                <li>SIRET : [98356287700024]</li>
-                <li>Adresse : [7 rue Royale,25300 Chaffois]</li>
+                <li>SIRET : 98356287700024</li>
                 <li>Email : acontrecourant25@gmail.com</li>
-                <li>Directeur de publication : Christopher [Crahay]</li>
+                <li>Directeur de publication : Christopher Crahay</li>
               </ul>
             </section>
 

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Play } from 'lucide-react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/Button';
 import { GradientBlur } from '@/components/ui/GradientBlur';
 import { AnimatedSection } from '@/components/ui/AnimatedSection';
@@ -46,19 +46,12 @@ export const Hero: React.FC = () => {
             {/* CTAs */}
             <div className="flex flex-col sm:flex-row gap-4 mb-8">
               <Button variant="primary" size="lg" asChild>
-                <Link href="/tarifs">Essai gratuit 14 jours</Link>
-              </Button>
-              <Button variant="outline" size="lg" icon={Play} asChild>
-                <Link href="/fonctionnalites">Voir la démo</Link>
+                <Link href="/essai-gratuit">Essai gratuit 14 jours</Link>
               </Button>
             </div>
 
             {/* Trust Elements */}
             <div className="flex flex-wrap gap-6 text-sm text-slate-600">
-              <div className="flex items-center gap-2">
-                <span className="text-green-600">✓</span>
-                <span>Aucune carte bancaire requise</span>
-              </div>
               <div className="flex items-center gap-2">
                 <span className="text-green-600">✓</span>
                 <span>Données hébergées en France</span>
@@ -73,13 +66,15 @@ export const Hero: React.FC = () => {
           {/* Right: Visual Placeholder */}
           <AnimatedSection delay={0.2}>
             <div className="relative">
-              <div className="aspect-[4/3] bg-gradient-to-br from-blue-100 to-blue-200 rounded-2xl shadow-2xl flex items-center justify-center">
-                <div className="text-center p-8">
-                  <div className="text-6xl mb-4">📱</div>
-                  <p className="text-slate-600 font-medium">
-                    Capture d&apos;écran de l&apos;application
-                  </p>
-                </div>
+              <div className="aspect-[4/3] bg-gradient-to-br from-blue-100 to-blue-200 rounded-2xl shadow-2xl flex items-center justify-center overflow-hidden">
+                <Image
+                  src="/aperçu devis généré.jpg"
+                  alt="Aperçu de l'application mobile ArtisanFlow avec plusieurs écrans"
+                  width={1200}
+                  height={900}
+                  className="w-full h-full object-contain"
+                  priority
+                />
               </div>
             </div>
           </AnimatedSection>

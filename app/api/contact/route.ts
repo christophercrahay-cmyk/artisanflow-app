@@ -23,8 +23,8 @@ export async function POST(request: Request) {
     //     'Content-Type': 'application/json',
     //   },
     //   body: JSON.stringify({
-    //     from: 'contact@artisanflow.app',
-    //     to: 'contact@artisanflow.app',
+    //     from: 'acontrecourant25@gmail.com',
+    //     to: 'acontrecourant25@gmail.com',
     //     subject: `Nouveau message de ${name}`,
     //     html: `<p>De: ${name} (${email})</p><p>Métier: ${metier}</p><p>Téléphone: ${phone || 'N/A'}</p><p>Message: ${message}</p>`,
     //   }),

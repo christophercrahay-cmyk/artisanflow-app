@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import { Mic, Share2, WifiOff } from 'lucide-react';
 import { Container } from '@/components/layout/Container';
 import { AnimatedSection } from '@/components/ui/AnimatedSection';
@@ -15,6 +16,8 @@ const features = [
       'Parlez naturellement de votre chantier. L\'IA génère un devis professionnel conforme avec vos tarifs, vos mentions légales, votre SIRET. Prêt à envoyer.',
     stat: 'De 45 min à 20 sec = Gagnez 2h/jour',
     imagePosition: 'right' as const,
+    imageSrc: '/aperçu devis généré.jpg',
+    imageAlt: 'Écran ArtisanFlow montrant un devis généré par l\'IA',
   },
   {
     icon: Share2,
@@ -24,6 +27,8 @@ const features = [
       'Un simple lien. Ils voient les photos, les devis, les factures en temps réel. Plus d\'appels, plus de stress. Client rassuré = recommandations.',
     stat: '90% des clients partagent le lien',
     imagePosition: 'left' as const,
+    imageSrc: '/fiche chantier.jpg',
+    imageAlt: 'Écran ArtisanFlow de suivi de chantier pour un client',
   },
   {
     icon: WifiOff,
@@ -33,6 +38,8 @@ const features = [
       'Mode hors ligne complet. Prenez des photos, ajoutez des notes, consultez vos chantiers. Synchronisation automatique dès que le réseau revient.',
     stat: '100% du temps, pas 80%',
     imagePosition: 'right' as const,
+    imageSrc: '/artisanflow/af-mode-hors-ligne.jpg',
+    imageAlt: 'Écran ArtisanFlow utilisé sur chantier, même sans réseau',
   },
 ];
 
@@ -81,13 +88,14 @@ export const SolutionFeatures: React.FC = () => {
                     feature.imagePosition === 'left' ? 'lg:col-start-1' : ''
                   }
                 >
-                  <div className="aspect-[4/3] bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl shadow-xl flex items-center justify-center">
-                    <div className="text-center p-8">
-                      <div className="text-6xl mb-4">📸</div>
-                      <p className="text-slate-600 font-medium">
-                        Capture d&apos;écran
-                      </p>
-                    </div>
+                  <div className="aspect-[4/3] bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl shadow-xl flex items-center justify-center overflow-hidden">
+                    <Image
+                      src={feature.imageSrc}
+                      alt={feature.imageAlt}
+                      width={1200}
+                      height={900}
+                      className="w-full h-full object-contain"
+                    />
                   </div>
                 </div>
               </div>

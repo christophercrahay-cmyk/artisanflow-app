@@ -75,14 +75,14 @@ export default function ContactPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Hero Section */}
-      <section className="bg-gradient-to-b from-blue-50 to-white py-16 md:py-24">
+      <section className="bg-gradient-to-b from-blue-50 to-white py-16 md:py-24 lg:py-32">
         <Container>
           <AnimatedSection>
-            <div className="max-w-3xl mx-auto text-center">
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 mb-6">
+            <div className="max-w-4xl mx-auto text-center px-4">
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 mb-6 leading-tight">
                 Une question ? Contactez-nous
               </h1>
-              <p className="text-xl text-slate-600">
+              <p className="text-xl md:text-2xl text-slate-600 leading-relaxed">
                 Nous répondons en moins de 24h, souvent en quelques heures
               </p>
             </div>
@@ -91,10 +91,10 @@ export default function ContactPage() {
       </section>
 
       {/* Contact Form */}
-      <section className="py-16 md:py-24">
+      <section className="py-16 md:py-24 lg:py-32">
         <Container>
           <AnimatedSection>
-            <div className="max-w-2xl mx-auto">
+            <div className="max-w-2xl mx-auto px-4">
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                 <Input
                   label="Prénom et nom"
@@ -157,7 +157,7 @@ export default function ContactPage() {
                 {submitStatus === 'error' && (
                   <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
                     Une erreur est survenue. Réessayez ou écrivez-nous
-                    directement à contact@artisanflow.app
+                    directement à acontrecourant25@gmail.com
                   </div>
                 )}
 
@@ -178,10 +178,10 @@ export default function ContactPage() {
                   Vous préférez un email direct ?
                 </p>
                 <a
-                  href="mailto:contact@artisanflow.app"
+                  href="mailto:acontrecourant25@gmail.com"
                   className="text-blue-600 hover:text-blue-700 font-medium"
                 >
-                  contact@artisanflow.app
+                  acontrecourant25@gmail.com
                 </a>
               </div>
             </div>

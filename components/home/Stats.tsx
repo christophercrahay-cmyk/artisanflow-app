@@ -6,7 +6,7 @@ import { Container } from '@/components/layout/Container';
 import { AnimatedSection } from '@/components/ui/AnimatedSection';
 
 const stats = [
-  { value: 20, suffix: ' sec', label: 'Temps de génération devis' },
+  { value: 20, suffix: 'sec', label: 'Temps de génération devis' },
   { value: 2, suffix: 'h/jour', label: 'Temps économisé' },
   { value: 100, suffix: '%', label: 'Fonctionne partout (offline)' },
   { value: 29.9, suffix: '€', label: 'Prix par mois' },
@@ -44,11 +44,20 @@ const AnimatedCounter: React.FC<{
 
   return (
     <div ref={ref} className="text-center">
-      <div className="text-4xl md:text-5xl lg:text-6xl font-bold text-blue-600 mb-2">
-        {count.toFixed(value % 1 !== 0 ? 1 : 0)}
-        {suffix}
+      <div className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-2">
+        {value === 29.9 ? (
+          <>
+            {count.toFixed(2).replace('.', ',')}
+            <span className="text-2xl align-top ml-1">{suffix}</span>
+          </>
+        ) : (
+          <>
+            {count.toFixed(value % 1 !== 0 ? 1 : 0)}
+            <span className="text-2xl align-top ml-1">{suffix}</span>
+          </>
+        )}
       </div>
-      <div className="text-slate-600 font-medium">{label}</div>
+      <div className="text-white/90 font-medium">{label}</div>
     </div>
   );
 };

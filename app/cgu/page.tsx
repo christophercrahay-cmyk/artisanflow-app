@@ -9,10 +9,10 @@ export const metadata: Metadata = {
 
 export default function CGUPage() {
   return (
-    <div className="min-h-screen bg-white py-16 md:py-24">
+    <div className="min-h-screen bg-white py-16 md:py-24 lg:py-32">
       <Container>
         <AnimatedSection>
-          <div className="max-w-4xl mx-auto prose prose-slate">
+          <div className="max-w-4xl mx-auto px-4 prose prose-slate prose-lg max-w-none">
             <h1 className="text-4xl font-bold text-slate-900 mb-4">
               Conditions Générales d&apos;Utilisation
             </h1>
@@ -64,18 +64,12 @@ export default function CGUPage() {
               <h3 className="text-xl font-semibold text-slate-900 mb-3">
                 2.2 Abonnement
               </h3>
-              <ul className="list-disc list-inside text-slate-700 space-y-2 mb-4">
-                <li>
-                  <strong>Essai gratuit :</strong> 7 jours sans engagement
-                </li>
-                <li>
-                  <strong>Tarif :</strong> 19,99 € TTC / mois après l&apos;essai
-                </li>
-                <li>
-                  <strong>Paiement :</strong> via Apple App Store ou Google
-                  Play Store
-                </li>
-              </ul>
+              <p className="text-slate-700 leading-relaxed mb-4">
+                Les modalités d&apos;abonnement (durée de l&apos;essai, tarif
+                mensuel et conditions) seront précisées lors de la mise en
+                service du système d&apos;abonnement. À ce jour, aucun
+                abonnement n&apos;est encore actif.
+              </p>
               <h3 className="text-xl font-semibold text-slate-900 mb-3">
                 2.3 Résiliation
               </h3>
@@ -269,10 +263,6 @@ export default function CGUPage() {
                   >
                     acontrecourant25@gmail.com
                   </a>
-                </li>
-                <li>
-                  <strong>Adresse :</strong> 7 Rue Royale, 25300 Chaffois,
-                  France
                 </li>
               </ul>
               <p className="text-slate-600 text-sm">

@@ -18,11 +18,11 @@ export const FinalCTA: React.FC = () => {
 
       <Container className="relative z-10">
         <AnimatedSection>
-          <div className="max-w-3xl mx-auto text-center">
-            <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6">
+          <div className="max-w-4xl mx-auto text-center px-4">
+            <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
               Prêt à gagner 2h par jour ?
             </h2>
-            <p className="text-xl md:text-2xl text-blue-100 mb-8">
+            <p className="text-xl md:text-2xl text-blue-100 mb-8 leading-relaxed">
               Rejoignez les artisans qui transforment leur quotidien avec
               ArtisanFlow.
             </p>
@@ -32,10 +32,10 @@ export const FinalCTA: React.FC = () => {
               className="mb-6"
               asChild
             >
-              <Link href="/tarifs">Commencer l&apos;essai gratuit</Link>
+              <Link href="/essai-gratuit">Me prévenir dès l&apos;ouverture</Link>
             </Button>
-            <p className="text-blue-100 text-sm mb-8">
-              14 jours gratuits • Sans carte bancaire • Annulation en 1 clic
+            <p className="text-blue-100 text-base md:text-lg mb-8 leading-relaxed">
+              Les abonnements seront disponibles très bientôt
             </p>
 
             {/* Trust Badges */}

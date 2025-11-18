@@ -11,15 +11,15 @@ export const metadata: Metadata = {
 
 export default function SuppressionComptePage() {
   return (
-    <div className="min-h-screen bg-white py-16 md:py-24">
+    <div className="min-h-screen bg-white py-16 md:py-24 lg:py-32">
       <Container>
         <AnimatedSection>
-          <div className="max-w-2xl mx-auto text-center">
-            <h1 className="text-4xl font-bold text-blue-600 mb-8">
+          <div className="max-w-4xl mx-auto px-4">
+            <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-10 text-center leading-tight">
               Suppression des données – ArtisanFlow
             </h1>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 mb-8">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 md:p-10 mb-8 max-w-2xl mx-auto">
               <p className="text-lg text-slate-700 leading-relaxed mb-6">
                 L&apos;application <strong>ArtisanFlow</strong> ne nécessite pas
                 de compte utilisateur. Toutefois, si vous souhaitez supprimer
@@ -28,12 +28,12 @@ export default function SuppressionComptePage() {
                 demande à l&apos;adresse suivante :
               </p>
 
-              <div className="text-2xl mb-6">
+              <div className="text-xl md:text-2xl mb-6 text-center">
                 <a
-                  href="mailto:christophercrahay@gmail.com"
+                  href="mailto:acontrecourant25@gmail.com"
                   className="text-blue-600 hover:text-blue-700 underline font-semibold"
                 >
-                  📧 christophercrahay@gmail.com
+                  acontrecourant25@gmail.com
                 </a>
               </div>
 
@@ -45,7 +45,7 @@ export default function SuppressionComptePage() {
               </p>
             </div>
 
-            <nav className="mt-8">
+            <nav className="mt-12 text-center">
               <Link
                 href="/"
                 className="text-blue-600 hover:text-blue-700 underline font-medium"

@@ -25,8 +25,8 @@ export const Header: React.FC = () => {
             {/* Logo */}
             <Link href="/" className="flex items-center space-x-2">
               <Image
-                src="/logo.svg"
-                alt="ArtisanFlow"
+                src="/logo.png"
+                alt="Logo ArtisanFlow"
                 width={32}
                 height={32}
                 className="w-8 h-8"

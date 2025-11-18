@@ -11,8 +11,8 @@ export const Footer: React.FC = () => {
           <div className="col-span-1 md:col-span-1">
             <div className="flex items-center space-x-2 mb-4">
               <Image
-                src="/logo.svg"
-                alt="ArtisanFlow"
+                src="/logo.png"
+                alt="Logo ArtisanFlow"
                 width={32}
                 height={32}
                 className="w-8 h-8"
@@ -110,10 +110,10 @@ export const Footer: React.FC = () => {
             <ul className="space-y-2">
               <li>
                 <a
-                  href="mailto:contact@artisanflow.app"
+                  href="mailto:acontrecourant25@gmail.com"
                   className="text-sm hover:text-white transition-colors"
                 >
-                  contact@artisanflow.app
+                  acontrecourant25@gmail.com
                 </a>
               </li>
             </ul>
