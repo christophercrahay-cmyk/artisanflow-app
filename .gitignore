@@ -1,27 +1,120 @@
-node_modules/
-.expo/
-.eas/
-backup/
-android/
-ios/
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/dist
+
+# misc
 .DS_Store
-*.log
+*.pem
+
+# debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# local env files
+.env*.local
 .env
-.env.local
-.env.*.local
-*.keystore
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Expo / React Native
+.expo/
+.expo-shared/
+android/
+android_backup/
+ios/
+web/
 *.jks
-*.pem
+*.p8
 *.p12
 *.key
-*.crt
-*.aab
-*.apk
+*.mobileprovision
+*.orig.*
+eas.json
 
-# Configuration files with secrets (commenté pour permettre le build EAS)
-# config/openai.js
-# config/supabase.js
-# config/sentry.js
+# React Native - Exclure tous les dossiers React Native
+screens/
+navigation/
+services/
+store/
+hooks/
+utils/
+theme/
+contexts/
+config/
+validation/
+
+# React Native - Exclure les composants React Native sauf ceux pour Next.js
+components/**/*.js
+components/**/*.tsx
+!components/layout/**
+!components/home/**
+!components/share/**
+!components/ui/Button.tsx
+!components/ui/Card.tsx
+!components/ui/Badge.tsx
+!components/ui/Input.tsx
+!components/ui/Textarea.tsx
+!components/ui/Spinner.tsx
+!components/ui/AnimatedSection.tsx
+!components/ui/GradientBlur.tsx
+
+# Build artifacts
+*.apk
+*.aab
+*.ipa
+*.app
+*.dmg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Supabase
+.supabase/
+supabase.bat
+supabase.exe
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Backup folders
+backup/
+coverage/
+__tests__/
+
+# Logs
+*.log
+.history/
+
+# Vite builds (si présents)
+dist/
+*.tsbuildinfo

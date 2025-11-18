@@ -92,3 +92,4 @@ Dans **Deploys** → **Functions logs**, vérifier s'il y a des erreurs.
 
 **Dernière mise à jour** : Novembre 2025
 
+

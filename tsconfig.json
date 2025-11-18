@@ -1,69 +1,76 @@
 {
-  "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true,
-    "target": "ES2020",
-    "module": "ESNext",
-    "lib": [
-      "ES2020"
-    ],
-    "jsx": "react-native",
-    "moduleResolution": "bundler",
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
     "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true,
-    "noImplicitAny": true,
-    "noImplicitThis": true,
-    "strictNullChecks": true,
-    "strictFunctionTypes": true,
-    "strictPropertyInitialization": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@components/*": [
-        "components/*"
-      ],
-      "@screens/*": [
-        "screens/*"
-      ],
-      "@utils/*": [
-        "utils/*"
-      ],
-      "@services/*": [
-        "services/*"
-      ],
-      "@hooks/*": [
-        "hooks/*"
-      ],
-      "@store/*": [
-        "store/*"
-      ],
-      "@theme/*": [
-        "theme/*"
-      ],
-      "@validation/*": [
-        "validation/*"
-      ],
-      "@config/*": [
-        "config/*"
-      ]
+      "@/*": ["./*"]
     }
   },
   "include": [
-    "**/*.ts",
-    "**/*.tsx"
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/layout/**/*.ts",
+    "components/layout/**/*.tsx",
+    "components/home/**/*.ts",
+    "components/home/**/*.tsx",
+    "components/share/**/*.ts",
+    "components/share/**/*.tsx",
+    "components/ui/Button.tsx",
+    "components/ui/Card.tsx",
+    "components/ui/Badge.tsx",
+    "components/ui/Input.tsx",
+    "components/ui/Textarea.tsx",
+    "components/ui/Spinner.tsx",
+    "components/ui/AnimatedSection.tsx",
+    "components/ui/GradientBlur.tsx",
+    "lib/**/*.ts",
+    "types/**/*.ts",
+    ".next/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "babel.config.js",
-    "metro.config.js",
-    "jest.config.js"
+    "components/**/*.js",
+    "components/**/*.tsx",
+    "!components/layout/**",
+    "!components/home/**",
+    "!components/share/**",
+    "!components/ui/Button.tsx",
+    "!components/ui/Card.tsx",
+    "!components/ui/Badge.tsx",
+    "!components/ui/Input.tsx",
+    "!components/ui/Textarea.tsx",
+    "!components/ui/Spinner.tsx",
+    "!components/ui/AnimatedSection.tsx",
+    "!components/ui/GradientBlur.tsx",
+    "screens",
+    "navigation",
+    "services",
+    "store",
+    "hooks",
+    "utils",
+    "theme",
+    "contexts",
+    "config",
+    "validation",
+    "android",
+    "ios",
+    "web"
   ]
 }

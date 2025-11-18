@@ -25,3 +25,4 @@ COMMENT ON COLUMN public.projects.share_token IS 'Token unique pour partage publ
 -- Message de confirmation
 SELECT '✅ Migration terminée: colonne share_token ajoutée à projects' as status;
 
+

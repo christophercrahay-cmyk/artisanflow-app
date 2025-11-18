@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Fond bleu -->
+  <rect width="200" height="200" fill="#3B82F6" rx="24"/>
+  
+  <!-- Lettre A stylisée -->
+  <path d="M 100 40 L 60 160 L 80 160 L 95 120 L 105 120 L 120 160 L 140 160 Z" fill="white"/>
+  <path d="M 95 100 L 100 80 L 105 100 Z" fill="#3B82F6"/>
+</svg>
+

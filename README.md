@@ -1,183 +1,159 @@
-# Supabase CLI
+# ArtisanFlow Website
 
-[![Coverage Status](https://coveralls.io/repos/github/supabase/cli/badge.svg?branch=main)](https://coveralls.io/github/supabase/cli?branch=main) [![Bitbucket Pipelines](https://img.shields.io/bitbucket/pipelines/supabase-cli/setup-cli/master?style=flat-square&label=Bitbucket%20Canary)](https://bitbucket.org/supabase-cli/setup-cli/pipelines) [![Gitlab Pipeline Status](https://img.shields.io/gitlab/pipeline-status/sweatybridge%2Fsetup-cli?label=Gitlab%20Canary)
-](https://gitlab.com/sweatybridge/setup-cli/-/pipelines)
+Site web officiel d'ArtisanFlow - L'application mobile qui fait gagner 2h par jour aux artisans.
 
-[Supabase](https://supabase.io) is an open source Firebase alternative. We're building the features of Firebase using enterprise-grade open source tools.
+## Stack Technique
 
-This repository contains all the functionality for Supabase CLI.
+- **Next.js 14** (App Router)
+- **TypeScript**
+- **Tailwind CSS**
+- **Framer Motion**
+- **Supabase**
+- **Vercel** (hébergement)
 
-- [x] Running Supabase locally
-- [x] Managing database migrations
-- [x] Creating and deploying Supabase Functions
-- [x] Generating types directly from your database schema
-- [x] Making authenticated HTTP requests to [Management API](https://supabase.com/docs/reference/api/introduction)
+## Démarrage
 
-## Getting started
+### Prérequis
 
-### Install the CLI
+- Node.js 18+ installé
+- Compte Supabase (pour la page de suivi client)
 
-Available via [NPM](https://www.npmjs.com) as dev dependency. To install:
+### Installation
 
-```bash
-npm i supabase --save-dev
-```
+1. Clonez le repository
 
-To install the beta release channel:
-
-```bash
-npm i supabase@beta --save-dev
-```
-
-When installing with yarn 4, you need to disable experimental fetch with the following nodejs config.
-
-```
-NODE_OPTIONS=--no-experimental-fetch yarn add supabase
-```
-
-> **Note**
-For Bun versions below v1.0.17, you must add `supabase` as a [trusted dependency](https://bun.sh/guides/install/trusted) before running `bun add -D supabase`.
-
-<details>
-  <summary><b>macOS</b></summary>
-
-  Available via [Homebrew](https://brew.sh). To install:
-
-  ```sh
-  brew install supabase/tap/supabase
-  ```
-
-  To install the beta release channel:
-  
-  ```sh
-  brew install supabase/tap/supabase-beta
-  brew link --overwrite supabase-beta
-  ```
-  
-  To upgrade:
-
-  ```sh
-  brew upgrade supabase
-  ```
-</details>
-
-<details>
-  <summary><b>Windows</b></summary>
-
-  Available via [Scoop](https://scoop.sh). To install:
-
-  ```powershell
-  scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
-  scoop install supabase
-  ```
-
-  To upgrade:
-
-  ```powershell
-  scoop update supabase
-  ```
-</details>
-
-<details>
-  <summary><b>Linux</b></summary>
-
-  Available via [Homebrew](https://brew.sh) and Linux packages.
-
-  #### via Homebrew
-
-  To install:
-
-  ```sh
-  brew install supabase/tap/supabase
-  ```
-
-  To upgrade:
-
-  ```sh
-  brew upgrade supabase
-  ```
-
-  #### via Linux packages
-
-  Linux packages are provided in [Releases](https://github.com/supabase/cli/releases). To install, download the `.apk`/`.deb`/`.rpm`/`.pkg.tar.zst` file depending on your package manager and run the respective commands.
-
-  ```sh
-  sudo apk add --allow-untrusted <...>.apk
-  ```
-
-  ```sh
-  sudo dpkg -i <...>.deb
-  ```
-
-  ```sh
-  sudo rpm -i <...>.rpm
-  ```
-
-  ```sh
-  sudo pacman -U <...>.pkg.tar.zst
-  ```
-</details>
-
-<details>
-  <summary><b>Other Platforms</b></summary>
-
-  You can also install the CLI via [go modules](https://go.dev/ref/mod#go-install) without the help of package managers.
-
-  ```sh
-  go install github.com/supabase/cli@latest
-  ```
-
-  Add a symlink to the binary in `$PATH` for easier access:
-
-  ```sh
-  ln -s "$(go env GOPATH)/bin/cli" /usr/bin/supabase
-  ```
-
-  This works on other non-standard Linux distros.
-</details>
-
-<details>
-  <summary><b>Community Maintained Packages</b></summary>
-
-  Available via [pkgx](https://pkgx.sh/). Package script [here](https://github.com/pkgxdev/pantry/blob/main/projects/supabase.com/cli/package.yml).
-  To install in your working directory:
-
-  ```bash
-  pkgx install supabase
-  ```
-
-  Available via [Nixpkgs](https://nixos.org/). Package script [here](https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/tools/supabase-cli/default.nix).
-</details>
-
-### Run the CLI
+2. Installez les dépendances :
 
 ```bash
-supabase bootstrap
+npm install
 ```
 
-Or using npx:
+3. Créez le fichier `.env.local` :
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=votre_url_supabase
+NEXT_PUBLIC_SUPABASE_ANON_KEY=votre_cle_anon
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+```
+
+4. Lancez le serveur de développement :
 
 ```bash
-npx supabase bootstrap
+npm run dev
 ```
 
-The bootstrap command will guide you through the process of setting up a Supabase project using one of the [starter](https://github.com/supabase-community/supabase-samples/blob/main/samples.json) templates.
+5. Ouvrez [http://localhost:3000](http://localhost:3000)
 
-## Docs
+## Structure du Projet
 
-Command & config reference can be found [here](https://supabase.com/docs/reference/cli/about).
+- `/app` - Pages Next.js 14 app router
+- `/components` - Composants React
+- `/lib` - Utilitaires, appels API, constantes
+- `/types` - Définitions de types TypeScript
+- `/public` - Assets statiques
 
-## Breaking changes
+## Déploiement sur Vercel
 
-We follow semantic versioning for changes that directly impact CLI commands, flags, and configurations.
+### Étape 1 : Push sur GitHub
 
-However, due to dependencies on other service images, we cannot guarantee that schema migrations, seed.sql, and generated types will always work for the same CLI major version. If you need such guarantees, we encourage you to pin a specific version of CLI in package.json.
-
-## Developing
-
-To run from source:
-
-```sh
-# Go >= 1.22
-go run . help
+```bash
+git init
+git add .
+git commit -m "Initial commit"
+git remote add origin VOTRE_REPO_GITHUB
+git push -u origin main
 ```
+
+### Étape 2 : Importer dans Vercel
+
+1. Allez sur [vercel.com](https://vercel.com)
+2. Cliquez sur "New Project"
+3. Importez votre repository GitHub
+4. Configurez :
+   - Framework : Next.js (auto-détecté)
+   - Root directory : ./
+   - Build command : `npm run build`
+   - Output directory : `.next`
+
+### Étape 3 : Ajouter les Variables d'Environnement
+
+Dans les paramètres du projet Vercel, ajoutez :
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SITE_URL` (votre URL de production)
+
+### Étape 4 : Déployer
+
+Cliquez sur "Deploy" - Vercel construira et déploiera automatiquement.
+
+## Configuration du Domaine Personnalisé (artisanflow.app)
+
+### Étape 1 : Dans Vercel Dashboard
+
+1. Allez dans Project Settings → Domains
+2. Cliquez sur "Add Domain"
+3. Entrez : artisanflow.app
+4. Vercel fournira les enregistrements DNS
+
+### Étape 2 : Dans Votre Registrar (Namecheap, etc.)
+
+Ajoutez les enregistrements DNS suivants :
+
+**Enregistrement A :**
+- Type : A
+- Host : @
+- Value : 76.76.21.21 (IP Vercel)
+- TTL : Automatique
+
+**Enregistrement CNAME (www) :**
+- Type : CNAME
+- Host : www
+- Value : cname.vercel-dns.com
+- TTL : Automatique
+
+### Étape 3 : Attendre la Propagation
+
+- Propagation DNS : 5 minutes à 48 heures (généralement 30 minutes)
+- Certificat SSL : Automatique via Vercel (Let's Encrypt)
+- Vérifiez le statut dans le dashboard Vercel
+
+## Fonctionnalités
+
+- ✅ Homepage avec copy optimisé pour la conversion
+- ✅ Page fonctionnalités avec détail complet
+- ✅ Page tarifs avec FAQ
+- ✅ Page à propos avec histoire du fondateur
+- ✅ Page contact avec formulaire
+- ✅ Pages légales (mentions légales, confidentialité)
+- ✅ Page de suivi client publique (`/share/chantier/[token]`)
+- ✅ Entièrement responsive (mobile-first)
+- ✅ Optimisé SEO
+- ✅ Animations fluides (Framer Motion)
+- ✅ Mode sombre pour la page de suivi client
+
+## Page de Suivi Client
+
+URL format : `/share/chantier/[token]`
+
+### Comment ça fonctionne :
+
+1. L'utilisateur génère un lien de partage dans l'app mobile
+2. Le lien contient un token unique sécurisé
+3. Le client ouvre le lien dans le navigateur (pas besoin d'app)
+4. Le serveur valide le token et récupère les données du projet
+5. Le client voit : infos projet, photos, devis, factures
+
+### Sécurité :
+
+- Token validé côté serveur via Supabase RPC
+- Aucune donnée sensible dans l'URL sauf le token
+- Token peut être révoqué à tout moment
+- Les politiques RLS protègent l'accès aux données
+
+## Contact
+
+Pour le support : contact@artisanflow.app
+
+## Licence
+
+Copyright © 2025 ArtisanFlow. Tous droits réservés.
