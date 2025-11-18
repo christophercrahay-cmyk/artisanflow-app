@@ -159,8 +159,8 @@ export default function ImportDataScreen({ navigation }: any) {
           <Text style={styles.backButtonText}>Retour</Text>
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <Text style={styles.title}>Importer mes données</Text>
-          <Text style={styles.subtitle}>Importez vos fichiers depuis un autre logiciel</Text>
+          <Text style={styles.title}>Importer vos données</Text>
+          <Text style={styles.subtitle}>Récupérez vos clients, chantiers et documents depuis vos anciens logiciels.</Text>
         </View>
       </View>
 
@@ -168,17 +168,15 @@ export default function ImportDataScreen({ navigation }: any) {
         {/* Description */}
         <View style={styles.section}>
           <Text style={styles.description}>
-            🧠 <Text style={{ fontWeight: '700' }}>Import intelligent avec GPT</Text>
+            Sélectionnez un fichier exporté depuis Obat, Tolteck, EBP, Excel ou tout autre logiciel (CSV, Excel, PDF, etc.).
             {'\n\n'}
-            Sélectionne un fichier exporté depuis n'importe quel logiciel (Obat, Tolteck, EBP, Excel, CSV, PDF, etc.).
+            ArtisanFlow s'occupe du tri et du nettoyage.
             {'\n\n'}
-            L'IA analysera automatiquement le fichier et :
-            {'\n'}• Détectera et nettoiera les données mal formatées
-            {'\n'}• Séparera correctement les adresses, emails, téléphones
-            {'\n'}• Identifiera les clients, projets, devis, factures
-            {'\n'}• Corrigera les erreurs de formatage automatiquement
-            {'\n\n'}
-            <Text style={{ fontWeight: '600' }}>💡 Plus puissant que l'import classique</Text>
+            L'IA analyse automatiquement votre fichier et :
+            {'\n'}• nettoie les données mal formatées
+            {'\n'}• sépare correctement adresses, emails et téléphones
+            {'\n'}• identifie les clients, projets, devis et factures
+            {'\n'}• corrige certaines erreurs de formatage automatiquement
           </Text>
         </View>
 
@@ -316,12 +314,12 @@ export default function ImportDataScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* Info sur le rebuild */}
+        {/* Info formats acceptés */}
         <View style={styles.section}>
           <View style={[styles.infoCard, { backgroundColor: theme.colors.surfaceAlt }]}>
-            <Feather name="info" size={20} color={theme.colors.primary} />
             <Text style={[styles.infoText, { color: theme.colors.textMuted }]}>
-              Si tu vois une erreur "Module natif non disponible", rebuild le Dev Client avec EAS.
+              💡 Formats acceptés : CSV, Excel (.xls, .xlsx), PDF (tableaux), etc.{'\n'}
+              Plus le fichier est structuré, plus l'import sera rapide.
             </Text>
           </View>
         </View>

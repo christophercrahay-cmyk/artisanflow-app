@@ -7,8 +7,14 @@
 
 import { supabase } from '../supabaseClient';
 
-// ✅ SÉCURISÉ : URL construite depuis variable d'environnement
-const EDGE_FUNCTION_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ai-devis-conversational`;
+// ✅ SÉCURISÉ : URL construite depuis le client Supabase
+const getEdgeFunctionUrl = () => {
+  const supabaseUrl = supabase.supabaseUrl;
+  if (!supabaseUrl) {
+    throw new Error('URL Supabase non disponible dans le client');
+  }
+  return `${supabaseUrl}/functions/v1/ai-devis-conversational`;
+};
 
 /**
  * Démarrer une nouvelle session de devis IA
@@ -28,7 +34,7 @@ export async function startDevisSession(transcription, projectId, clientId, user
       throw new Error('Utilisateur non authentifié');
     }
 
-    const response = await fetch(EDGE_FUNCTION_URL, {
+    const response = await fetch(getEdgeFunctionUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -75,7 +81,7 @@ export async function answerQuestions(sessionId, reponses) {
       throw new Error('Utilisateur non authentifié');
     }
 
-    const response = await fetch(EDGE_FUNCTION_URL, {
+    const response = await fetch(getEdgeFunctionUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -118,7 +124,7 @@ export async function finalizeDevis(sessionId) {
       throw new Error('Utilisateur non authentifié');
     }
 
-    const response = await fetch(EDGE_FUNCTION_URL, {
+    const response = await fetch(getEdgeFunctionUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -179,7 +185,7 @@ export async function createDevisFromAI(sessionId, devisData, projectId, clientI
         montant_ht: devisData.total_ht,
         tva_percent: devisData.tva_pourcent,
         montant_ttc: devisData.total_ttc,
-        statut: 'brouillon',
+        statut: 'edition',
         notes: devisData.description,
         transcription: `Généré par IA - Session: ${sessionId}`,
       })
@@ -262,9 +268,7 @@ export async function startFactureSession(transcription, projectId, clientId, us
     }
 
     // Utiliser la même Edge Function mais avec type=facture
-    const EDGE_FUNCTION_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ai-devis-conversational`;
-
-    const response = await fetch(EDGE_FUNCTION_URL, {
+    const response = await fetch(getEdgeFunctionUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -341,7 +345,7 @@ export async function createFactureFromAI(sessionId, factureData, projectId, cli
         montant_ht: factureData.total_ht,
         tva_percent: factureData.tva_pourcent,
         montant_ttc: factureData.total_ttc,
-        statut: 'brouillon',
+        statut: 'edition',
         notes: factureData.description,
         transcription: `Générée par IA - Session: ${sessionId}`,
       })

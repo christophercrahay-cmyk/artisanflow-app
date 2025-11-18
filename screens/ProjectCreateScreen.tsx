@@ -15,11 +15,15 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeTheme } from '../theme/useSafeTheme';
 import { supabase } from '../supabaseClient';
 import { showSuccess, showError } from '../components/Toast';
+import { AFInput } from '../components/ui';
 import { PendingCapture } from '../types/capture';
 import { Client } from '../types';
 import { useAttachCaptureToProject } from '../hooks/useAttachCaptureToProject';
 import logger from '../utils/logger';
 import { requireProOrPaywall } from '../utils/proAccess';
+import ClientPicker from '../components/clients/ClientPicker';
+import ClientSelectorField from '../components/clients/ClientSelectorField';
+import { useRequireOnline } from '../utils/requireOnline';
 
 interface ProjectCreateRouteParams {
   initialCapture?: PendingCapture;
@@ -43,6 +47,7 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
   const theme = useSafeTheme();
   const { initialCapture, clientId: initialClientId } = route.params || {};
   const { attachCapture } = useAttachCaptureToProject();
+  const { checkAndShowMessage } = useRequireOnline('Création de chantier');
 
   const [projectName, setProjectName] = useState('');
   const [projectAddress, setProjectAddress] = useState('');
@@ -51,6 +56,7 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
   const [creating, setCreating] = useState(false);
   const [loadingClients, setLoadingClients] = useState(true);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [showClientPicker, setShowClientPicker] = useState(false);
 
   const styles = getStyles(theme, insets);
 
@@ -85,8 +91,8 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
       if (clientsList.length === 0) {
         logger.warn('ProjectCreate', 'Aucun client trouvé');
         // Ne pas bloquer l'UI, mais afficher un message dans le formulaire
-      } else if (!selectedClientId && initialClientId) {
-        // Si un clientId initial est fourni, vérifier qu'il existe
+      } else if (initialClientId) {
+        // Si un clientId initial est fourni (depuis la fiche client), pré-sélectionner ce client
         const clientExists = clientsList.find(c => c.id === initialClientId);
         if (clientExists) {
           setSelectedClientId(initialClientId);
@@ -96,25 +102,6 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
           if (clientExists.address) {
             setProjectAddress(clientExists.address);
           }
-        } else {
-          // Si le client initial n'existe plus, sélectionner le premier
-          const firstClient = clientsList[0];
-          setSelectedClientId(firstClient.id);
-          setSelectedClient(firstClient);
-          setProjectName(`Chantier - ${firstClient.name}`);
-          if (firstClient.address) {
-            setProjectAddress(firstClient.address);
-          }
-        }
-      } else if (!selectedClientId && clientsList.length > 0) {
-        // Sélectionner le premier client par défaut
-        const firstClient = clientsList[0];
-        setSelectedClientId(firstClient.id);
-        setSelectedClient(firstClient);
-        // Pré-remplir le nom et l'adresse
-        setProjectName(`Chantier - ${firstClient.name}`);
-        if (firstClient.address) {
-          setProjectAddress(firstClient.address);
         }
       }
     } catch (err) {
@@ -125,6 +112,11 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
   };
 
   const handleCreateProject = async () => {
+    // Vérifier la connexion
+    if (!checkAndShowMessage()) {
+      return;
+    }
+
     // Vérifier l'accès Pro
     const ok = await requireProOrPaywall(navigation, 'Création projet');
     if (!ok) return;
@@ -242,7 +234,6 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
           <View style={styles.form}>
             {/* Sélection client */}
             <View style={styles.field}>
-              <Text style={styles.label}>Client *</Text>
               {loadingClients ? (
                 <ActivityIndicator size="small" color={theme.colors.accent} />
               ) : clients.length === 0 ? (
@@ -254,9 +245,7 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
                   <TouchableOpacity
                     style={styles.createClientButton}
                     onPress={() => {
-                      // ✅ FIX : Retour simple à l'écran précédent
-                      // L'utilisateur peut créer un client depuis l'onglet Clients
-                      navigation.goBack();
+                      navigation.navigate('ClientsList');
                     }}
                     activeOpacity={0.7}
                   >
@@ -265,50 +254,23 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
                   </TouchableOpacity>
                 </View>
               ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.clientScroll}>
-                  {clients.map((client) => (
-                    <TouchableOpacity
-                      key={client.id}
-                      onPress={() => {
-                        setSelectedClientId(client.id);
-                        setSelectedClient(client);
-                        // Pré-remplir le nom et l'adresse quand on change de client
-                        setProjectName(`Chantier - ${client.name}`);
-                        if (client.address) {
-                          setProjectAddress(client.address);
-                        } else {
-                          setProjectAddress('');
-                        }
-                      }}
-                      style={[
-                        styles.clientChip,
-                        selectedClientId === client.id && styles.clientChipSelected,
-                      ]}
-                      activeOpacity={0.7}
-                    >
-                      <Text
-                        style={[
-                          styles.clientChipText,
-                          selectedClientId === client.id && styles.clientChipTextSelected,
-                        ]}
-                      >
-                        {client.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+                <ClientSelectorField
+                  label="Client"
+                  selectedClient={selectedClient}
+                  onPress={() => setShowClientPicker(true)}
+                  required
+                />
               )}
             </View>
 
             {/* Nom du projet */}
             <View style={styles.field}>
               <Text style={styles.label}>Nom du chantier *</Text>
-              <TextInput
+              <AFInput
+                icon="briefcase"
                 placeholder="Ex: Rénovation cuisine"
-                placeholderTextColor={theme.colors.textMuted}
                 value={projectName}
                 onChangeText={setProjectName}
-                style={styles.input}
                 autoCapitalize="words"
                 editable={!creating}
               />
@@ -317,12 +279,11 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
             {/* Adresse */}
             <View style={styles.field}>
               <Text style={styles.label}>Adresse</Text>
-              <TextInput
+              <AFInput
+                icon="map-pin"
                 placeholder="Adresse du chantier (optionnel)"
-                placeholderTextColor={theme.colors.textMuted}
                 value={projectAddress}
                 onChangeText={setProjectAddress}
-                style={styles.input}
                 multiline
                 numberOfLines={2}
                 editable={!creating}
@@ -351,6 +312,28 @@ export default function ProjectCreateScreen({ route, navigation }: ProjectCreate
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Client Picker Modal */}
+      <ClientPicker
+        visible={showClientPicker}
+        clients={clients}
+        selectedClientId={selectedClientId}
+        onSelectClient={(client) => {
+          setSelectedClientId(client.id);
+          setSelectedClient(client);
+          // Pré-remplir le nom et l'adresse quand on change de client
+          setProjectName(`Chantier - ${client.name}`);
+          if (client.address) {
+            setProjectAddress(client.address);
+          } else {
+            setProjectAddress('');
+          }
+        }}
+        onClose={() => setShowClientPicker(false)}
+        onCreateNew={() => {
+          navigation.navigate('ClientsList');
+        }}
+      />
     </SafeAreaView>
   );
 }

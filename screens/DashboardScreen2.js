@@ -26,6 +26,14 @@ import logger from '../utils/logger';
 import EmptyState from '../components/EmptyState';
 import HomeHeader from '../components/HomeHeader';
 
+// Palette de couleurs pour les icônes de statistiques
+const STAT_ICON_COLORS = {
+  active: '#3B82F6',   // Actifs : bleu
+  done: '#22C55E',     // Terminés : vert
+  photos: '#8B5CF6',   // Photos : violet
+  docs: '#FACC15',     // Documents : jaune/orange
+};
+
 export default function DashboardScreen2({ navigation }) {
   const theme = useThemeColors();
   const [loading, setLoading] = useState(true);
@@ -214,7 +222,7 @@ export default function DashboardScreen2({ navigation }) {
             icon="folder"
             label="Chantiers actifs"
             value={stats.activeProjects}
-            color={theme.colors.primary}
+            color={STAT_ICON_COLORS.active}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               navigation.navigate('ProjectsList');
@@ -229,7 +237,7 @@ export default function DashboardScreen2({ navigation }) {
             icon="check-circle"
             label="Terminés"
             value={stats.completedProjects}
-            color={theme.colors.success}
+            color={STAT_ICON_COLORS.done}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               navigation.navigate('ClientsTab');
@@ -243,7 +251,7 @@ export default function DashboardScreen2({ navigation }) {
             icon="camera"
             label="Photos"
             value={stats.recentPhotos}
-            color={theme.colors.info}
+            color={STAT_ICON_COLORS.photos}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               if (stats.recentPhotos > 0) {
@@ -261,7 +269,7 @@ export default function DashboardScreen2({ navigation }) {
             icon="file-text"
             label="Documents"
             value={stats.recentDocuments}
-            color={theme.colors.warning}
+            color={STAT_ICON_COLORS.docs}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               navigation.navigate('ProTab', { screen: 'Documents' });

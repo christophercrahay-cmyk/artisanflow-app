@@ -14,13 +14,16 @@ import {
   Pressable,
   Modal,
   ActivityIndicator,
+  Linking,
+  Keyboard,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as DocumentPicker from 'expo-document-picker';
 import { useThemeColors } from '../theme/theme2';
-import { ScreenContainer, AppCard, PrimaryButton, SectionTitle } from '../components/ui';
+import { ScreenContainer, AppCard, PrimaryButton, SectionTitle, AFInput } from '../components/ui';
+import SearchBar from '../components/SearchBar';
 import { supabase } from '../supabaseClient';
 import { formatAddress, prepareClientData } from '../utils/addressFormatter';
 import { getCurrentUser } from '../utils/auth';
@@ -37,9 +40,14 @@ import { getOrDetectMapping, saveMapping } from '../services/import/clientImport
 import ClientImportMappingModal from '../components/clients/ClientImportMappingModal';
 import { createCSVTemplateFile } from '../utils/import/generateCSVTemplate';
 import * as Sharing from 'expo-sharing';
+import { useNetworkStatus } from '../contexts/NetworkStatusContext';
+import { cacheClients, loadCachedClients } from '../services/offlineCacheService';
+import { useRequireOnline } from '../utils/requireOnline';
 
 export default function ClientsListScreen2({ navigation }) {
   const theme = useThemeColors();
+  const { isOffline } = useNetworkStatus();
+  const { checkAndShowMessage } = useRequireOnline('Création de client');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -64,18 +72,38 @@ export default function ClientsListScreen2({ navigation }) {
   const [currentMapping, setCurrentMapping] = useState(null);
   const [headersSignature, setHeadersSignature] = useState(null);
 
-  // ✅ Filtrer les clients selon la recherche
+  // Fonction de normalisation pour recherche "intelligente" (insensible à la casse et aux accents)
+  const normalize = useCallback((value) => {
+    if (!value) return '';
+    return value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // suppression accents
+      .trim();
+  }, []);
+
+  // ✅ Filtrer les clients selon la recherche (temps réel)
   const filteredClients = useMemo(() => {
     if (!searchQuery.trim()) return clients;
     
-    const query = searchQuery.toLowerCase().trim();
-    return clients.filter(client => 
-      client.name?.toLowerCase().includes(query) ||
-      client.phone?.includes(query) ||
-      client.email?.toLowerCase().includes(query) ||
-      client.address?.toLowerCase().includes(query)
-    );
-  }, [clients, searchQuery]);
+    const q = normalize(searchQuery);
+    
+    return clients.filter((client) => {
+      const name = normalize(client.name);
+      const company = normalize(client.company);
+      const address = normalize(client.address);
+      const email = normalize(client.email);
+      const phone = normalize(client.phone?.toString());
+      
+      return (
+        name.includes(q) ||
+        company.includes(q) ||
+        address.includes(q) ||
+        email.includes(q) ||
+        phone.includes(q)
+      );
+    });
+  }, [clients, searchQuery, normalize]);
 
   const styles = useMemo(() => getStyles(theme), [theme]);
 
@@ -93,24 +121,50 @@ export default function ClientsListScreen2({ navigation }) {
         return;
       }
 
+      // Si hors ligne, charger depuis le cache
+      if (isOffline) {
+        logger.info('ClientsList', 'Mode hors ligne, chargement depuis cache');
+        const cachedClients = await loadCachedClients();
+        setClients(cachedClients);
+        return;
+      }
+
       logger.info('ClientsList', `Chargement clients pour user: ${user.id}`);
       
       const { data, error } = await supabase
         .from('clients')
         .select('id,name,phone,email,address,created_at')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('name', { ascending: true });
       
       if (error) {
         logger.error('ClientsList', 'Erreur chargement clients', error);
         showError(getErrorMessage(error, 'load'));
+        // En cas d'erreur, essayer de charger depuis le cache
+        const cachedClients = await loadCachedClients();
+        if (cachedClients.length > 0) {
+          logger.info('ClientsList', 'Chargement depuis cache après erreur');
+          setClients(cachedClients);
+        }
         return;
       }
       logger.info('ClientsList', `${data?.length || 0} clients chargés`);
       setClients(data || []);
+      
+      // Mettre à jour le cache
+      if (data && data.length > 0) {
+        await cacheClients(data);
+      }
     } catch (err) {
       logger.error('ClientsList', 'Exception chargement clients', err);
-      showError(getErrorMessage(err, 'load'));
+      // En cas d'erreur, essayer de charger depuis le cache
+      const cachedClients = await loadCachedClients();
+      if (cachedClients.length > 0) {
+        logger.info('ClientsList', 'Chargement depuis cache après exception');
+        setClients(cachedClients);
+      } else {
+        showError(getErrorMessage(err, 'load'));
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -128,6 +182,11 @@ export default function ClientsListScreen2({ navigation }) {
   );
 
   const addClient = async () => {
+    // Vérifier la connexion
+    if (!checkAndShowMessage()) {
+      return;
+    }
+
     // Vérifier l'accès Pro
     const ok = await requireProOrPaywall(navigation, 'Création client');
     if (!ok) return;
@@ -555,6 +614,24 @@ export default function ClientsListScreen2({ navigation }) {
     );
   };
 
+  // Handlers pour téléphone et email cliquables
+  const handleCall = (phone) => {
+    if (!phone) return;
+    const cleaned = phone.toString().replace(/\s+/g, '');
+    const url = `tel:${cleaned}`;
+    Linking.openURL(url).catch((err) => {
+      console.warn('Erreur ouverture téléphone', err);
+    });
+  };
+
+  const handleEmail = (email) => {
+    if (!email) return;
+    const url = `mailto:${email}`;
+    Linking.openURL(url).catch((err) => {
+      console.warn('Erreur ouverture email', err);
+    });
+  };
+
 
   return (
     <ScreenContainer 
@@ -563,111 +640,32 @@ export default function ClientsListScreen2({ navigation }) {
       refreshing={refreshing}
       onRefresh={handleRefresh}
     >
-      {/* Header */}
+      {/* BLOC 1 : Header */}
       <View style={styles.header}>
-        <Text style={[styles.title, { color: theme.colors.text, letterSpacing: theme.letterSpacing.wide }]}>
+        <Text style={styles.title}>
           Clients
         </Text>
-        <Text style={[styles.subtitle, { color: theme.colors.textMuted }]}>
+        <Text style={styles.subtitle}>
           Gestion de votre base client
         </Text>
       </View>
       
       {/* Barre de recherche */}
-      <View style={[styles.searchContainer, { 
-        backgroundColor: theme.colors.surfaceAlt,
-        borderRadius: theme.radius.md,
-        borderColor: theme.colors.border,
-      }]}>
-        <Feather name="search" size={20} color={theme.colors.textMuted} />
-        <TextInput
-          style={[styles.searchInput, { color: theme.colors.text }]}
-          placeholder="Rechercher un client..."
-          placeholderTextColor={theme.colors.textSoft}
+      <View style={styles.searchContainer}>
+        <SearchBar
           value={searchQuery}
           onChangeText={setSearchQuery}
+          placeholder="Rechercher un client..."
         />
       </View>
 
-      {/* Formulaire dans AppCard premium */}
-      <AppCard premium style={styles.formCard}>
-        {/* Header du formulaire avec bouton import */}
-        <View style={styles.formHeaderContainer}>
-          <View style={[styles.formHeader, { 
-            backgroundColor: theme.colors.surfaceAlt,
-            borderRadius: theme.radius.md,
-            flex: 1,
-          }]}>
-            <Text style={styles.formHeaderEmoji}>🧑</Text>
-            <Text style={[styles.formHeaderText, { color: theme.colors.text }]}>
-              Nouveau client
-            </Text>
-          </View>
-          
-          {/* Boutons Import */}
-          <View style={styles.importActions}>
-            <TouchableOpacity
-              style={[styles.importButton, {
-                backgroundColor: theme.colors.surfaceAlt,
-                borderColor: theme.colors.border,
-              }]}
-              onPress={handleImportPress}
-              disabled={isImporting}
-            >
-              <Feather name="upload" size={18} color={theme.colors.primary} />
-              <Text style={[styles.importButtonText, { color: theme.colors.primary }]}>
-                Importer
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[styles.importButton, {
-                backgroundColor: theme.colors.primary,
-                borderColor: theme.colors.primary,
-              }]}
-              onPress={() => {
-                requireProOrPaywall(navigation, 'Import avec IA').then((ok) => {
-                  if (ok) {
-                    navigation.navigate('ImportData');
-                  }
-                });
-              }}
-            >
-              <Feather name="zap" size={18} color="#FFFFFF" />
-              <Text style={[styles.importButtonText, { color: '#FFFFFF' }]}>
-                Importer avec IA
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[styles.templateButton, {
-                backgroundColor: theme.colors.surfaceAlt,
-                borderColor: theme.colors.border,
-              }]}
-              onPress={handleDownloadTemplate}
-            >
-              <Feather name="download" size={16} color={theme.colors.textMuted} />
-              <Text style={[styles.templateButtonText, { color: theme.colors.textMuted }]}>
-                📄 Modèle CSV
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Inputs avec glow au focus */}
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: theme.colors.surfaceAlt,
-              borderColor: focusedField === 'name' ? theme.colors.primary : theme.colors.border,
-              borderRadius: theme.radius.md,
-              color: theme.colors.text,
-            },
-            focusedField === 'name' && theme.glowBlueLight,
-          ]}
+      {/* BLOC 2 : Formulaire d'ajout client */}
+      <View style={styles.formCard}>
+        <Text style={styles.formTitle}>Ajouter un client</Text>
+        
+        <AFInput
+          icon="user"
           placeholder="Nom *"
-          placeholderTextColor={theme.colors.textSoft}
           value={name}
           onChangeText={setName}
           onFocus={() => {
@@ -678,132 +676,126 @@ export default function ClientsListScreen2({ navigation }) {
           onBlur={() => setFocusedField(null)}
         />
 
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: theme.colors.surfaceAlt,
-              borderColor: focusedField === 'phone' ? theme.colors.primary : theme.colors.border,
-              borderRadius: theme.radius.md,
-              color: theme.colors.text,
-            },
-            focusedField === 'phone' && theme.glowBlueLight,
-          ]}
+        <AFInput
+          icon="phone"
           placeholder="Téléphone"
-          placeholderTextColor={theme.colors.textSoft}
           keyboardType="phone-pad"
           value={phone}
           onChangeText={setPhone}
           onFocus={() => {
             setFocusedField('phone');
-            // // // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           }}
           onBlur={() => setFocusedField(null)}
         />
 
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: theme.colors.surfaceAlt,
-              borderColor: focusedField === 'email' ? theme.colors.primary : theme.colors.border,
-              borderRadius: theme.radius.md,
-              color: theme.colors.text,
-            },
-            focusedField === 'email' && theme.glowBlueLight,
-          ]}
+        <AFInput
+          icon="mail"
           placeholder="Email"
-          placeholderTextColor={theme.colors.textSoft}
           keyboardType="email-address"
           autoCapitalize="none"
           value={email}
           onChangeText={setEmail}
           onFocus={() => {
             setFocusedField('email');
-            // // // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           }}
           onBlur={() => setFocusedField(null)}
         />
 
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: theme.colors.surfaceAlt,
-              borderColor: focusedField === 'address' ? theme.colors.primary : theme.colors.border,
-              borderRadius: theme.radius.md,
-              color: theme.colors.text,
-            },
-            focusedField === 'address' && theme.glowBlueLight,
-          ]}
+        <AFInput
+          icon="map-pin"
           placeholder="Adresse *"
-          placeholderTextColor={theme.colors.textSoft}
           value={address}
           onChangeText={setAddress}
           onFocus={() => {
             setFocusedField('address');
-            // // // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           }}
           onBlur={() => setFocusedField(null)}
         />
 
-        <View style={styles.row}>
-          <TextInput
-            style={[
-              styles.input,
-              styles.inputHalf,
-              {
-                backgroundColor: theme.colors.surfaceAlt,
-                borderColor: focusedField === 'postal' ? theme.colors.primary : theme.colors.border,
-                borderRadius: theme.radius.md,
-                color: theme.colors.text,
-              },
-              focusedField === 'postal' && theme.glowBlueLight,
-            ]}
+        <View style={styles.formRow}>
+          <AFInput
             placeholder="Code postal"
-            placeholderTextColor={theme.colors.textSoft}
             keyboardType="numeric"
             value={postalCode}
             onChangeText={setPostalCode}
             onFocus={() => {
               setFocusedField('postal');
-              // // // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }}
             onBlur={() => setFocusedField(null)}
+            containerStyle={{ flex: 1, marginRight: 7 }}
           />
 
-          <TextInput
-            style={[
-              styles.input,
-              styles.inputHalf,
-              {
-                backgroundColor: theme.colors.surfaceAlt,
-                borderColor: focusedField === 'city' ? theme.colors.primary : theme.colors.border,
-                borderRadius: theme.radius.md,
-                color: theme.colors.text,
-              },
-              focusedField === 'city' && theme.glowBlueLight,
-            ]}
+          <AFInput
+            icon="map-pin"
             placeholder="Ville"
-            placeholderTextColor={theme.colors.textSoft}
             autoCapitalize="words"
             value={city}
             onChangeText={setCity}
             onFocus={() => {
               setFocusedField('city');
-              // // // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }}
             onBlur={() => setFocusedField(null)}
+            containerStyle={{ flex: 1, marginLeft: 7 }}
           />
         </View>
-      </AppCard>
 
-      {/* Section Liste */}
-      <SectionTitle
-        title={`Liste (${filteredClients.length})`}
-        emoji="👥"
-        style={styles.sectionTitle}
-      />
+        <TouchableOpacity
+          style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+          onPress={addClient}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <>
+              <Feather name="check" size={18} color="#FFFFFF" />
+              <Text style={styles.submitButtonText}>Ajouter le client</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* BLOC 3 : Actions d'import */}
+      <View style={styles.actionsCard}>
+        <View style={styles.secondaryActionsRow}>
+          <TouchableOpacity
+            style={styles.secondaryActionButton}
+            onPress={handleImportPress}
+            disabled={isImporting}
+          >
+            <Feather name="upload" size={18} color="#FFFFFF" />
+            <Text style={styles.secondaryActionText}>Importer</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.premiumActionButton}
+            onPress={() => {
+              requireProOrPaywall(navigation, 'Import avec IA').then((ok) => {
+                if (ok) {
+                  navigation.navigate('ImportData');
+                }
+              });
+            }}
+          >
+            <Text style={styles.premiumActionIcon}>⚡</Text>
+            <Text style={styles.premiumActionText}>Importer avec IA</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          style={styles.templateLink}
+          onPress={handleDownloadTemplate}
+        >
+          <Feather name="file-text" size={14} color="#9CA3AF" />
+          <Text style={styles.templateLinkText}>Télécharger modèle CSV</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* BLOC 4 : Liste clients */}
+      <View style={styles.listHeader}>
+        <Feather name="users" size={20} color="#3B82F6" />
+        <Text style={styles.listTitle}>Liste ({filteredClients.length})</Text>
+      </View>
 
       {/* Liste clients */}
       {filteredClients.length === 0 ? (
@@ -817,71 +809,83 @@ export default function ClientsListScreen2({ navigation }) {
           <Pressable
             key={client.id}
             onPress={() => {
-              // // // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               navigation.navigate('ClientDetail', { clientId: client.id });
             }}
             style={({ pressed }) => [
-              pressed && { transform: [{ scale: 0.98 }], opacity: 0.9 },
+              styles.cardPressable,
+              pressed && styles.cardPressed,
             ]}
           >
-            <AppCard style={styles.clientCard}>
+            <View style={styles.clientCard}>
               <View style={styles.clientInfo}>
                 <View style={styles.clientHeader}>
-                  <Feather name="user" size={18} color={theme.colors.primary} />
-                  <Text style={[styles.cardTitle, { color: theme.colors.text }]}>
+                  <Text style={styles.cardName} numberOfLines={1}>
                     {client.name}
                   </Text>
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      deleteClient(client.id, client.name);
+                    }}
+                    style={styles.deleteButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Supprimer ${client.name}`}
+                  >
+                    <Feather name="trash-2" size={18} color={theme.colors.danger} />
+                  </TouchableOpacity>
                 </View>
                 {client.address && (
-                  <View style={styles.clientRow}>
-                    <Feather name="map-pin" size={14} color={theme.colors.textMuted} />
-                    <Text style={[styles.cardLine, { color: theme.colors.textMuted }]}>
+                  <View style={styles.infoRow}>
+                    <Feather name="map-pin" size={14} color="#A4A9B3" style={styles.infoIcon} />
+                    <Text style={styles.infoText} numberOfLines={2}>
                       {client.address}
                     </Text>
                   </View>
                 )}
                 {client.phone && (
-                  <View style={styles.clientRow}>
-                    <Feather name="phone" size={14} color={theme.colors.textMuted} />
-                    <Text style={[styles.cardLine, { color: theme.colors.textMuted }]}>
-                      {client.phone}
-                    </Text>
+                  <View style={styles.infoRow}>
+                    <Feather name="phone" size={14} color="#A4A9B3" style={styles.infoIcon} />
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleCall(client.phone);
+                      }}
+                      style={styles.infoTextWrapper}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Appeler ${client.phone}`}
+                    >
+                      <Text style={styles.infoTextLink} numberOfLines={1}>
+                        {client.phone}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
                 )}
                 {client.email && (
-                  <View style={styles.clientRow}>
-                    <Feather name="mail" size={14} color={theme.colors.textMuted} />
-                    <Text style={[styles.cardLine, { color: theme.colors.textMuted }]}>
-                      {client.email}
-                    </Text>
+                  <View style={styles.infoRow}>
+                    <Feather name="mail" size={14} color="#A4A9B3" style={styles.infoIcon} />
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleEmail(client.email);
+                      }}
+                      style={styles.infoTextWrapper}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Envoyer un email à ${client.email}`}
+                    >
+                      <Text style={styles.infoTextLink} numberOfLines={1}>
+                        {client.email}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
                 )}
               </View>
-              <TouchableOpacity
-                onPress={(e) => {
-                  e.stopPropagation();
-                  // // // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  deleteClient(client.id, client.name);
-                }}
-                style={styles.deleteButton}
-              >
-                <Feather name="trash-2" size={18} color={theme.colors.danger} />
-              </TouchableOpacity>
-            </AppCard>
+            </View>
           </Pressable>
         ))
       )}
 
-      {/* Bouton flottant avec glow bleu */}
-      <View style={styles.floatingButtonContainer}>
-        <PrimaryButton
-          title="AJOUTER"
-          icon="✅"
-          onPress={addClient}
-          loading={loading}
-          style={[styles.floatingButton, theme.glowBlue]}
-        />
-      </View>
 
       {/* Modal de confirmation d'import */}
       <Modal
@@ -996,113 +1000,189 @@ export default function ClientsListScreen2({ navigation }) {
 
 const getStyles = (theme) => StyleSheet.create({
   scrollContent: {
-    paddingBottom: 100,
+    padding: 20,
+    paddingBottom: 160,
   },
+  // BLOC 1 : Header
   header: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingTop: theme.spacing.lg,
-    paddingBottom: theme.spacing.md,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 16,
   },
   title: {
-    fontSize: theme.typography.h1,
-    fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing.xs,
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 4,
   },
   subtitle: {
-    fontSize: theme.typography.body,
+    fontSize: 14,
+    color: '#9CA3AF',
   },
   searchContainer: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+  },
+  // BLOC 3 : Actions d'import
+  actionsCard: {
+    backgroundColor: '#15171C',
+    borderRadius: 20,
+    padding: 20,
+    marginVertical: 20,
+  },
+  primaryActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.lg,
-    paddingHorizontal: theme.spacing.md,
-    height: 48,
-    borderWidth: 1,
+    justifyContent: 'center',
+    backgroundColor: '#3E7BFA',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    gap: 10,
   },
-  searchInput: {
+  primaryActionText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  secondaryActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  secondaryActionButton: {
     flex: 1,
-    marginLeft: theme.spacing.sm,
-    fontSize: theme.typography.body,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1C1F25',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 8,
   },
+  secondaryActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  premiumActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2563EB',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  premiumActionIcon: {
+    fontSize: 16,
+  },
+  premiumActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  templateLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  templateLinkText: {
+    fontSize: 13,
+    color: '#9CA3AF',
+  },
+  // BLOC 2 : Formulaire d'ajout client
   formCard: {
-    marginHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.xl,
+    backgroundColor: '#15171C',
+    borderRadius: 18,
+    padding: 20,
+    marginBottom: 20,
   },
-  formHeaderContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    marginBottom: theme.spacing.lg,
+  formTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 16,
   },
-  formHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    padding: theme.spacing.md,
+  formInput: {
+    backgroundColor: '#1C1F25',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#FFFFFF',
+    marginBottom: 14,
   },
-  importActions: {
-    flexDirection: 'column',
-    gap: theme.spacing.xs,
-  },
-  importButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.radius.md,
+  formInputFocused: {
+    borderColor: '#3E7BFA',
     borderWidth: 1,
   },
-  importButtonText: {
-    fontSize: theme.typography.body,
-    fontWeight: theme.fontWeights.semibold,
-  },
-  templateButton: {
+  formRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.xs,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
+    gap: 12,
+    marginBottom: 14,
   },
-  templateButtonText: {
-    fontSize: 12,
-    fontWeight: theme.fontWeights.medium,
-  },
-  formHeaderEmoji: {
-    fontSize: 20,
-  },
-  formHeaderText: {
-    fontSize: theme.typography.h3,
-    fontWeight: theme.fontWeights.bold,
-  },
-  input: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    fontSize: theme.typography.body,
-    borderWidth: 1,
-    marginBottom: theme.spacing.md,
-    height: 42,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-  },
-  inputHalf: {
+  formInputHalf: {
     flex: 1,
   },
-  sectionTitle: {
-    paddingHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.md,
+  submitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3E7BFA',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginTop: 8,
+    gap: 10,
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  // BLOC 4 : Liste
+  listHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 10,
+  },
+  listTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  cardPressable: {
+    marginBottom: 12,
+  },
+  cardPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.99 }],
   },
   clientCard: {
-    marginHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.md,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    backgroundColor: '#1A1D23',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   clientInfo: {
     flex: 1,
@@ -1110,34 +1190,40 @@ const getStyles = (theme) => StyleSheet.create({
   clientHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.sm,
-    gap: theme.spacing.sm,
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  cardTitle: {
-    fontSize: theme.typography.h3,
-    fontWeight: theme.fontWeights.semibold,
+  cardName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    flex: 1,
+    marginRight: 8,
   },
-  clientRow: {
+  infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: theme.spacing.xs,
-    gap: theme.spacing.sm,
+    marginTop: 4,
   },
-  cardLine: {
-    fontSize: theme.typography.small,
+  infoIcon: {
+    marginRight: 8,
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#A4A9B3',
+    flex: 1,
+  },
+  infoTextWrapper: {
+    flex: 1,
+  },
+  infoTextLink: {
+    fontSize: 13,
+    color: '#4DA3FF',
   },
   deleteButton: {
-    padding: theme.spacing.sm,
-  },
-  floatingButtonContainer: {
-    position: 'absolute',
-    bottom: 24,
-    left: theme.spacing.lg,
-    right: theme.spacing.lg,
-    zIndex: 100,
-  },
-  floatingButton: {
-    width: '100%',
+    padding: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   // Styles modal import
   modalOverlay: {

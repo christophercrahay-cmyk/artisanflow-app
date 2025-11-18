@@ -94,6 +94,12 @@ const getStyles = (theme: any) => StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.text,
     letterSpacing: -0.5,
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: theme.colors.textMuted,
+    fontWeight: '400',
   },
 });
 

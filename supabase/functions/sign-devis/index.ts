@@ -80,7 +80,7 @@ async function getDevisPublicInfo(devisId: string) {
       date_creation,
       projects:projects!inner (
         id,
-        title,
+        name,
         clients:clients!inner(
           id,
           name
@@ -120,7 +120,7 @@ async function handleInfo(req: Request, token: string) {
 
   const { data: artisan, error: artisanErr } = await supabaseAdmin
     .from("profiles")
-    .select("id, full_name, company_name, company_city, company_address, company_siret, company_tva")
+    .select("id, full_name, company_name, email, phone")
     .eq("id", link.artisan_id)
     .maybeSingle();
   if (artisanErr) throw artisanErr;
@@ -133,7 +133,7 @@ async function handleInfo(req: Request, token: string) {
       montant_ttc: devis.montant_ttc,
       date_creation: devis.date_creation,
       client_name: devis.projects?.clients?.name ?? null,
-      project_title: devis.projects?.title ?? null,
+      project_name: devis.projects?.name ?? null,
     },
     artisan: artisan ?? { id: link.artisan_id },
   });
@@ -168,6 +168,7 @@ async function handleSign(httpReq: Request, body: SignRequest, ip: string | null
   const { error: devisErr } = await supabaseAdmin
     .from("devis")
     .update({
+      statut: "signe",
       signature_status: "signed",
       signed_at: new Date().toISOString(),
       signed_by_name: body.name,
@@ -202,8 +203,19 @@ serve(async (request: Request) => {
     return new Response("OK", { headers: cors });
   }
 
+  let body: SignDevisRequest | null = null;
   try {
-    const body = (await request.json()) as SignDevisRequest;
+    body = (await request.json()) as SignDevisRequest;
+  } catch (error) {
+    console.error("[sign-devis] JSON parse error", error);
+    return jsonResponseWithCors(request, {
+      ok: false,
+      reason: "bad_request",
+      message: "Invalid JSON body",
+    }, 400);
+  }
+
+  try {
     const { headers } = request;
     const ip = headers.get("x-forwarded-for") ?? headers.get("x-real-ip") ?? null;
     const userAgent = headers.get("user-agent") ?? null;

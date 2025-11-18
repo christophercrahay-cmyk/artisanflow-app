@@ -4,7 +4,7 @@
  */
 
 import React, { useRef, useEffect } from 'react';
-import { View, ScrollView, StyleSheet, Animated, RefreshControl } from 'react-native';
+import { View, ScrollView, StyleSheet, Animated, RefreshControl, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThemeColors } from '../../theme/theme2';
 
@@ -65,6 +65,8 @@ export const ScreenContainer = ({
           style={styles.container}
           contentContainerStyle={scrollable ? contentStyle : undefined}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={scrollable ? Keyboard.dismiss : undefined}
           refreshControl={
             scrollable && onRefresh ? (
               <RefreshControl

@@ -1,3 +1,4 @@
+// Refonte premium SettingsScreen – Max
 import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
@@ -19,6 +20,7 @@ import { supabase } from '../supabaseClient';
 import { useAppStore } from '../store/useAppStore';
 import { useSafeTheme } from '../theme/useSafeTheme';
 import { Feather } from '@expo/vector-icons';
+import { AFInput } from '../components/ui';
 import { signOut } from '../utils/auth';
 import logger from '../utils/logger';
 import { 
@@ -33,7 +35,6 @@ import { TemplatePreview } from '../components/TemplatePreview';
 import { TemplatePreviewModal } from '../components/TemplatePreviewModal';
 
 // Flag pour activer/désactiver la section "Couleurs"
-// À passer à true quand le Design System 2.0 supportera les thèmes personnalisés
 const ENABLE_THEME_COLOR_SETTING = false;
 
 export default function SettingsScreen({ navigation }) {
@@ -47,7 +48,6 @@ export default function SettingsScreen({ navigation }) {
   const [companyName, setCompanyName] = useState('Mon Entreprise');
   const [companySiret, setCompanySiret] = useState('');
   const [companyAddress, setCompanyAddress] = useState('');
-  const [companyCity, setCompanyCity] = useState('');
   const [companyPhone, setCompanyPhone] = useState('');
   const [companyEmail, setCompanyEmail] = useState('');
   const [tvaDefault, setTvaDefault] = useState('20');
@@ -82,7 +82,6 @@ export default function SettingsScreen({ navigation }) {
     try {
       setLoading(true);
       
-      // Récupérer l'utilisateur connecté pour filtrer par user_id (RLS)
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         console.warn('SettingsScreen', 'Utilisateur non connecté');
@@ -92,16 +91,14 @@ export default function SettingsScreen({ navigation }) {
       const { data, error } = await supabase
         .from('brand_settings')
         .select('*')
-        .eq('user_id', user.id) // Filtrer par user_id pour RLS
+        .eq('user_id', user.id)
         .limit(1)
-        .maybeSingle(); // Utiliser maybeSingle() pour gérer l'absence de données
+        .maybeSingle();
 
       if (error) {
-        // PGRST116 = aucune ligne trouvée (normal si settings n'existent pas encore)
         if (error.code !== 'PGRST116') {
           console.error('Erreur chargement settings:', error);
         }
-        // Continuer même si aucun setting n'existe (on utilisera les valeurs par défaut)
         return;
       }
 
@@ -110,11 +107,9 @@ export default function SettingsScreen({ navigation }) {
         setCompanyName(data.company_name || 'Mon Entreprise');
         setCompanySiret(data.company_siret || '');
         setCompanyAddress(data.company_address || '');
-        setCompanyCity(data.company_city || '');
         setCompanyPhone(data.company_phone || '');
         setCompanyEmail(data.company_email || '');
         setTvaDefault(data.tva_default?.toString() || '20');
-        // ✅ Gérer la compatibilité avec l'ancien 'premium' -> 'premiumNoirOr'
         let templateValue = data.template_default || DEFAULT_TEMPLATE;
         if (templateValue === 'premium') {
           templateValue = 'premiumNoirOr';
@@ -126,7 +121,6 @@ export default function SettingsScreen({ navigation }) {
         setLogoUrl(data.logo_url);
         setFirstName(data.first_name || '');
         
-        // ✅ Charger champs légaux
         setCompanyTvaNumber(data.company_tva_number || '');
         setInsuranceRcpProvider(data.insurance_rcp_provider || '');
         setInsuranceRcpPolicy(data.insurance_rcp_policy || '');
@@ -152,7 +146,7 @@ export default function SettingsScreen({ navigation }) {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -190,7 +184,6 @@ export default function SettingsScreen({ navigation }) {
           text: 'Je confirme la suppression',
           style: 'destructive',
           onPress: () => {
-            // Double confirmation pour éviter les erreurs
             Alert.alert(
               '🚨 DERNIÈRE CONFIRMATION',
               'Votre compte et TOUTES vos données seront supprimés dans 3 secondes.\n\nCette action ne peut PAS être annulée.',
@@ -219,26 +212,11 @@ export default function SettingsScreen({ navigation }) {
         throw new Error('Utilisateur non authentifié');
       }
 
-      // Les données sont supprimées automatiquement par CASCADE (FK)
-      // ON DELETE CASCADE sur toutes les tables :
-      // - clients → projects → project_photos, notes, devis, factures
-      // - brand_settings
-      
-      // Supprimer le compte utilisateur via Supabase Admin API
-      // Note: Cette API nécessite un endpoint backend ou une fonction Edge
-      // Pour l'instant, on supprime les données puis on déconnecte
-      
-      // Alternative : Utiliser Supabase RPC (function SQL)
       const { error: rpcError } = await supabase.rpc('delete_user_account');
       
       if (rpcError) {
-        // Si la function RPC n'existe pas, on fait la suppression manuelle
         logger.warn('Settings', 'RPC delete_user_account non disponible, suppression manuelle');
         
-        // Supprimer toutes les données utilisateur manuellement
-        // Les FK CASCADE supprimeront automatiquement les données liées
-        
-        // Supprimer les clients (cascade → projects → photos, notes, etc.)
         const { error: clientsError } = await supabase
           .from('clients')
           .delete()
@@ -248,7 +226,6 @@ export default function SettingsScreen({ navigation }) {
           logger.error('Settings', 'Erreur suppression clients', clientsError);
         }
         
-        // Supprimer les settings
         const { error: settingsError } = await supabase
           .from('brand_settings')
           .delete()
@@ -260,8 +237,6 @@ export default function SettingsScreen({ navigation }) {
       }
 
       logger.success('Settings', 'Données utilisateur supprimées');
-
-      // Déconnexion
       await signOut();
       
       Alert.alert(
@@ -284,7 +259,6 @@ export default function SettingsScreen({ navigation }) {
     try {
       setSaving(true);
 
-      // Récupérer l'utilisateur connecté pour RLS
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {throw new Error('Utilisateur non authentifié');}
 
@@ -292,7 +266,6 @@ export default function SettingsScreen({ navigation }) {
         company_name: companyName.trim(),
         company_siret: companySiret.trim(),
         company_address: companyAddress.trim(),
-        company_city: companyCity.trim() || null, // Ville pour la météo
         company_phone: companyPhone.trim(),
         company_email: companyEmail.trim(),
         tva_default: parseFloat(tvaDefault) || 20,
@@ -301,11 +274,10 @@ export default function SettingsScreen({ navigation }) {
         facture_prefix: facturePrefix.trim(),
         primary_color: primaryColor.trim(),
         logo_url: logoUrl,
-        first_name: firstName.trim() || null, // Prénom pour la salutation
+        first_name: firstName.trim() || null,
         updated_at: new Date().toISOString(),
-        user_id: user.id, // Nécessaire pour RLS
+        user_id: user.id,
         
-        // ✅ Champs légaux (conformité devis/factures)
         company_tva_number: companyTvaNumber.trim() || null,
         insurance_rcp_provider: insuranceRcpProvider.trim() || null,
         insurance_rcp_policy: insuranceRcpPolicy.trim() || null,
@@ -335,7 +307,6 @@ export default function SettingsScreen({ navigation }) {
       logger.error('Settings', 'Erreur sauvegarde settings', err);
       console.error('Erreur sauvegarde settings:', err);
       
-      // Message d'erreur plus détaillé
       let errorMessage = 'Impossible de sauvegarder';
       if (err.message) {
         errorMessage = err.message;
@@ -363,35 +334,32 @@ export default function SettingsScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <View style={styles.headerRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
-              <Feather name="arrow-left" size={24} color={theme.colors.accent} strokeWidth={2.5} />
-              <Text style={styles.backBtnText}>Retour</Text>
-            </TouchableOpacity>
-            <View style={{ flex: 1, marginLeft: theme.spacing?.md || 12 }}>
-              <Text style={styles.title}>Paramètres</Text>
-              <Text style={styles.subtitle}>Personnalisez votre identité</Text>
-            </View>
-          </View>
-        </View>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
+          <Feather name="arrow-left" size={24} color="#FFFFFF" strokeWidth={2.5} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Paramètres</Text>
+      </View>
 
-        <View style={styles.section}>
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* CARD 1 : Identité & Logo */}
+        <View style={styles.card}>
           <View style={styles.sectionHeader}>
-            <Feather name="image" size={20} color={theme.colors.accent} />
-            <Text style={styles.sectionTitle}>Logo de l'entreprise</Text>
+            <Feather name="image" size={20} color="#3B82F6" />
+            <Text style={styles.sectionTitle}>Identité & Logo</Text>
           </View>
-          <Text style={styles.helpText}>
-            Ajoutez ici le logo de votre entreprise. Il sera utilisé sur vos documents (devis, factures).
-          </Text>
+          
           <View style={styles.logoContainer}>
             <TouchableOpacity style={styles.logoButton} onPress={handleLogoPick} activeOpacity={0.7}>
               {logoUrl ? (
                 <Image source={{ uri: logoUrl }} style={styles.logoImage} />
               ) : (
                 <View style={styles.logoPlaceholder}>
-                  <Feather name="image" size={32} color={theme.colors.textSecondary} />
+                  <Feather name="image" size={32} color="#9CA3AF" />
                   <Text style={styles.logoText}>Ajouter un logo</Text>
                 </View>
               )}
@@ -402,101 +370,99 @@ export default function SettingsScreen({ navigation }) {
                 onPress={handleLogoPick}
                 activeOpacity={0.7}
               >
-                <Feather name="edit-2" size={16} color={theme.colors.accent} strokeWidth={2.5} />
-                <Text style={styles.changeLogoText}>Modifier</Text>
+                <Text style={styles.changeLogoText}>Changer le logo</Text>
               </TouchableOpacity>
             )}
           </View>
-        </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Feather name="briefcase" size={20} color={theme.colors.accent} />
-            <Text style={styles.sectionTitle}>Entreprise</Text>
-          </View>
-          <Text style={styles.label}>Nom *</Text>
-          <TextInput
-            style={styles.input}
+          <Text style={styles.label}>Nom entreprise</Text>
+          <AFInput
+            icon="briefcase"
             value={companyName}
             onChangeText={setCompanyName}
             placeholder="Mon Entreprise"
-            placeholderTextColor={theme.colors.textMuted}
           />
+
           <Text style={styles.label}>SIRET</Text>
-          <TextInput
-            style={styles.input}
+          <AFInput
+            icon="hash"
             value={companySiret}
             onChangeText={setCompanySiret}
             placeholder="12345678901234"
-            placeholderTextColor={theme.colors.textMuted}
             keyboardType="numeric"
           />
+
           <Text style={styles.label}>Adresse</Text>
-          <TextInput
-            style={styles.input}
+          <AFInput
+            icon="map-pin"
             value={companyAddress}
             onChangeText={setCompanyAddress}
             placeholder="123 rue de la République"
-            placeholderTextColor={theme.colors.textMuted}
             multiline
           />
-          <Text style={styles.label}>Ville (pour la météo)</Text>
-          <TextInput
-            style={styles.input}
-            value={companyCity}
-            onChangeText={setCompanyCity}
-            placeholder="Paris"
-            placeholderTextColor={theme.colors.textMuted}
-            autoCapitalize="words"
-          />
+
           <Text style={styles.label}>Téléphone</Text>
-          <TextInput
-            style={styles.input}
+          <AFInput
+            icon="phone"
             value={companyPhone}
             onChangeText={setCompanyPhone}
             placeholder="0123456789"
-            placeholderTextColor={theme.colors.textMuted}
             keyboardType="phone-pad"
           />
+
           <Text style={styles.label}>Email</Text>
-          <TextInput
-            style={styles.input}
+          <AFInput
+            icon="mail"
             value={companyEmail}
             onChangeText={setCompanyEmail}
             placeholder="contact@entreprise.fr"
-            placeholderTextColor={theme.colors.textMuted}
             keyboardType="email-address"
             autoCapitalize="none"
           />
         </View>
 
-        <View style={styles.section}>
+        {/* CARD 2 : Facturation */}
+        <View style={styles.card}>
           <View style={styles.sectionHeader}>
-            <Feather name="dollar-sign" size={20} color={theme.colors.accent} />
+            <Feather name="tag" size={20} color="#3B82F6" />
             <Text style={styles.sectionTitle}>Facturation</Text>
           </View>
+
           <Text style={styles.label}>TVA par défaut (%)</Text>
-          <TextInput
-            style={styles.input}
+          <AFInput
+            icon="percent"
             value={tvaDefault}
             onChangeText={setTvaDefault}
-            placeholderTextColor={theme.colors.textMuted}
             keyboardType="decimal-pad"
             placeholder="20"
           />
+
           <Text style={styles.label}>Modèle de document</Text>
           <Pressable
-            style={[styles.templateSelect, {
-              backgroundColor: theme.colors.surfaceElevated || theme.colors.surface,
-              borderColor: theme.colors.border || theme.colors.textMuted,
-            }]}
+            style={styles.dropdown}
             onPress={() => setShowTemplateModal(true)}
           >
-            <Text style={[styles.templateSelectLabel, { color: theme.colors.text }]}>
+            <Text style={styles.dropdownText}>
               {DOCUMENT_TEMPLATES[templateDefault]?.label || 'Classique'}
             </Text>
-            <Feather name="chevron-down" size={20} color={theme.colors.textMuted} />
+            <Feather name="chevron-down" size={20} color="#9CA3AF" />
           </Pressable>
+
+          <Text style={styles.label}>Préfixe devis</Text>
+          <AFInput
+            icon="hash"
+            value={devisPrefix}
+            onChangeText={setDevisPrefix}
+            placeholder="DEV"
+          />
+
+          <Text style={styles.label}>Préfixe facture</Text>
+          <AFInput
+            icon="hash"
+            value={facturePrefix}
+            onChangeText={setFacturePrefix}
+            placeholder="FA"
+          />
         </View>
 
         {/* Modal de sélection de template */}
@@ -511,18 +477,18 @@ export default function SettingsScreen({ navigation }) {
             onPress={() => setShowTemplateModal(false)}
           >
             <Pressable
-              style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}
+              style={styles.modalContent}
               onPress={(e) => e.stopPropagation()}
             >
               <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
+                <Text style={styles.modalTitle}>
                   Choisir un modèle de document
                 </Text>
                 <TouchableOpacity
                   onPress={() => setShowTemplateModal(false)}
                   style={styles.modalCloseButton}
                 >
-                  <Feather name="x" size={24} color={theme.colors.textMuted} />
+                  <Feather name="x" size={24} color="#9CA3AF" />
                 </TouchableOpacity>
               </View>
               <ScrollView style={styles.modalScrollView}>
@@ -536,11 +502,11 @@ export default function SettingsScreen({ navigation }) {
                         styles.templateOption,
                         {
                           backgroundColor: isSelected
-                            ? theme.colors.accent + '20'
-                            : theme.colors.surfaceElevated || theme.colors.surface,
+                            ? '#3E7BFA20'
+                            : '#1C1F24',
                           borderColor: isSelected
-                            ? theme.colors.accent
-                            : theme.colors.border || theme.colors.textMuted,
+                            ? '#3E7BFA'
+                            : 'rgba(255,255,255,0.05)',
                         },
                       ]}
                       onPress={async () => {
@@ -555,7 +521,6 @@ export default function SettingsScreen({ navigation }) {
                         }
                       }}
                     >
-                      {/* Aperçu visuel du template */}
                       <TouchableOpacity
                         onPress={(e) => {
                           e.stopPropagation();
@@ -571,7 +536,7 @@ export default function SettingsScreen({ navigation }) {
                           style={[
                             styles.templateOptionLabel,
                             {
-                              color: isSelected ? theme.colors.accent : theme.colors.text,
+                              color: isSelected ? '#3E7BFA' : '#FFFFFF',
                               fontWeight: isSelected ? '700' : '500',
                             },
                           ]}
@@ -581,7 +546,7 @@ export default function SettingsScreen({ navigation }) {
                         <Text
                           style={[
                             styles.templateOptionDescription,
-                            { color: theme.colors.textMuted },
+                            { color: '#9CA3AF' },
                           ]}
                         >
                           {template.description}
@@ -595,10 +560,10 @@ export default function SettingsScreen({ navigation }) {
                           }}
                           style={styles.previewButton}
                         >
-                          <Feather name="eye" size={18} color={theme.colors.accent} />
+                          <Feather name="eye" size={18} color="#3E7BFA" />
                         </TouchableOpacity>
                         {isSelected && (
-                          <Feather name="check" size={20} color={theme.colors.accent} />
+                          <Feather name="check" size={20} color="#3E7BFA" />
                         )}
                       </View>
                     </Pressable>
@@ -609,7 +574,6 @@ export default function SettingsScreen({ navigation }) {
           </Pressable>
         </Modal>
 
-        {/* Modal d'aperçu plein écran */}
         <TemplatePreviewModal
           visible={previewTemplateId !== null}
           templateId={previewTemplateId}
@@ -627,40 +591,15 @@ export default function SettingsScreen({ navigation }) {
           }}
         />
 
-        {/* Section "Templates de devis" masquée - conservée pour compatibilité future */}
-        {/* <View style={styles.section}>
+        {/* CARD 3 : Mentions légales */}
+        <View style={styles.card}>
           <View style={styles.sectionHeader}>
-            <Feather name="file-text" size={20} color={theme.colors.accent} />
-            <Text style={styles.sectionTitle}>Templates de devis</Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.templateLinkButton, {
-              backgroundColor: theme.colors.surfaceElevated || theme.colors.surface,
-              borderRadius: theme.borderRadius.md,
-            }]}
-            onPress={() => navigation.navigate('Templates')}
-            activeOpacity={0.7}
-          >
-            <Feather name="file-text" size={20} color={theme.colors.accent} />
-            <Text style={[styles.templateLinkText, { color: theme.colors.text }]}>
-              Gérer les templates
-            </Text>
-            <Feather name="chevron-right" size={20} color={theme.colors.textMuted} />
-          </TouchableOpacity>
-        </View> */}
-
-        {/* ✅ NOUVELLE SECTION : Mentions légales */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Feather name="shield" size={20} color={theme.colors.accent} />
+            <Feather name="shield" size={20} color="#3B82F6" />
             <Text style={styles.sectionTitle}>Mentions légales</Text>
           </View>
-          <Text style={styles.helpText}>
-            Informations obligatoires pour la conformité de vos devis et factures (DGCCRF).
-          </Text>
 
-          <Text style={styles.label}>Forme juridique *</Text>
-          <View style={styles.pickerContainer}>
+          <Text style={styles.label}>Forme juridique</Text>
+          <View style={styles.dropdownContainer}>
             <Picker
               selectedValue={legalForm}
               onValueChange={(value) => setLegalForm(value)}
@@ -671,7 +610,7 @@ export default function SettingsScreen({ navigation }) {
               <Picker.Item label="SARL" value="sarl" />
               <Picker.Item label="SAS" value="sas" />
               <Picker.Item label="SASU" value="sasu" />
-              <Picker.Item label="SCI" value="sci" />
+              <Picker.Item label="EI" value="ei" />
               <Picker.Item label="Autre" value="other" />
             </Picker>
           </View>
@@ -684,62 +623,55 @@ export default function SettingsScreen({ navigation }) {
                 value={capitalSocial}
                 onChangeText={setCapitalSocial}
                 placeholder="10000€"
-                placeholderTextColor={theme.colors.textMuted}
+                placeholderTextColor="#6B7280"
                 keyboardType="numeric"
               />
             </>
           )}
 
-          <Text style={styles.label}>Numéro TVA intracommunautaire *</Text>
+          <Text style={styles.label}>TVA intracommunautaire</Text>
           <TextInput
             style={styles.input}
             value={companyTvaNumber}
             onChangeText={setCompanyTvaNumber}
             placeholder="FR12345678901"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor="#6B7280"
             autoCapitalize="characters"
           />
-          <Text style={styles.helpText}>
-            Format : FRXX XXXXXXXXX (obligatoire pour facturation)
-          </Text>
 
-          <Text style={styles.label}>Assurance RCP (Responsabilité Civile Pro) *</Text>
+          <Text style={styles.label}>Assurance RCP (nom)</Text>
           <TextInput
             style={styles.input}
             value={insuranceRcpProvider}
             onChangeText={setInsuranceRcpProvider}
             placeholder="Nom de l'assureur (ex: AXA, MAIF)"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor="#6B7280"
           />
+          <Text style={styles.label}>Assurance RCP (numéro)</Text>
           <TextInput
-            style={[styles.input, { marginTop: 8 }]}
+            style={styles.input}
             value={insuranceRcpPolicy}
             onChangeText={setInsuranceRcpPolicy}
             placeholder="Numéro de police"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor="#6B7280"
           />
-          <Text style={styles.helpText}>
-            Obligatoire pour artisans (Loi Spinetta)
-          </Text>
 
-          <Text style={styles.label}>Assurance décennale (si BTP)</Text>
+          <Text style={styles.label}>Assurance Décennale (nom)</Text>
           <TextInput
             style={styles.input}
             value={insuranceDecennaleProvider}
             onChangeText={setInsuranceDecennaleProvider}
             placeholder="Nom de l'assureur"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor="#6B7280"
           />
+          <Text style={styles.label}>Assurance Décennale (numéro)</Text>
           <TextInput
-            style={[styles.input, { marginTop: 8 }]}
+            style={styles.input}
             value={insuranceDecennalePolicy}
             onChangeText={setInsuranceDecennalePolicy}
             placeholder="Numéro de police"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor="#6B7280"
           />
-          <Text style={styles.helpText}>
-            Obligatoire si vous réalisez des travaux de construction
-          </Text>
 
           <Text style={styles.label}>Qualification professionnelle</Text>
           <TextInput
@@ -747,88 +679,48 @@ export default function SettingsScreen({ navigation }) {
             value={professionalQualification}
             onChangeText={setProfessionalQualification}
             placeholder="Ex: RGE, Qualibat, etc."
-            placeholderTextColor={theme.colors.textMuted}
-          />
-          <Text style={styles.helpText}>
-            Certifications et qualifications officielles (optionnel)
-          </Text>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Feather name="hash" size={20} color={theme.colors.accent} />
-            <Text style={styles.sectionTitle}>Numérotation</Text>
-          </View>
-          <Text style={styles.label}>Préfixe Devis</Text>
-          <TextInput
-            style={styles.input}
-            value={devisPrefix}
-            onChangeText={setDevisPrefix}
-            placeholder="DEV"
-            placeholderTextColor={theme.colors.textMuted}
-          />
-          <Text style={styles.label}>Préfixe Facture</Text>
-          <TextInput
-            style={styles.input}
-            value={facturePrefix}
-            onChangeText={setFacturePrefix}
-            placeholder="FA"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor="#6B7280"
           />
         </View>
 
-        {/* Section Import de données */}
-        <View style={styles.section}>
+        {/* CARD 4 : Import de données */}
+        <View style={styles.card}>
           <View style={styles.sectionHeader}>
-            <Feather name="upload" size={20} color={theme.colors.accent} />
+            <Feather name="upload" size={20} color="#3B82F6" />
             <Text style={styles.sectionTitle}>Import de données</Text>
           </View>
-          <Text style={styles.helpText}>
-            Importez vos clients depuis un fichier CSV, Excel, JSON ou PDF exporté depuis un autre logiciel.
-          </Text>
           <TouchableOpacity
-            style={[styles.templateLinkButton, {
-              backgroundColor: theme.colors.surfaceElevated || theme.colors.surface,
-              borderRadius: theme.borderRadius?.md || 8,
-            }]}
+            style={styles.importButton}
             onPress={() => navigation.navigate('ImportData')}
             activeOpacity={0.7}
           >
-            <Feather name="upload" size={20} color={theme.colors.accent} />
-            <Text style={[styles.templateLinkText, { color: theme.colors.text }]}>
-              Importer mes données
-            </Text>
-            <Feather name="chevron-right" size={20} color={theme.colors.textMuted} />
+            <Feather name="upload" size={20} color="#FFFFFF" />
+            <Text style={styles.importButtonText}>Importer mes données</Text>
           </TouchableOpacity>
+          <Text style={styles.importInfo}>
+            Importez vos clients depuis un fichier CSV, Excel, JSON ou PDF exporté depuis un autre logiciel.
+          </Text>
         </View>
 
-        {/* Section Préférences */}
-        <View style={styles.section}>
+        {/* CARD 5 : Préférences */}
+        <View style={styles.card}>
           <View style={styles.sectionHeader}>
-            <Feather name="settings" size={20} color={theme.colors.accent} />
+            <Feather name="settings" size={20} color="#3B82F6" />
             <Text style={styles.sectionTitle}>Préférences</Text>
           </View>
           
           <Text style={styles.label}>Prénom</Text>
-          <Text style={styles.helpText}>
-            Votre prénom sera utilisé dans la salutation de l'accueil (ex: "Bonjour, Jean")
-          </Text>
           <TextInput
             style={styles.input}
             value={firstName}
             onChangeText={setFirstName}
             placeholder="Jean"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor="#6B7280"
             autoCapitalize="words"
           />
           
           <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Vibrations</Text>
-              <Text style={styles.settingDescription}>
-                Active ou désactive les vibrations au toucher dans l'application
-              </Text>
-            </View>
+            <Text style={styles.settingLabel}>Vibrations</Text>
             <Switch
               value={hapticsEnabled}
               onValueChange={async (value) => {
@@ -837,422 +729,376 @@ export default function SettingsScreen({ navigation }) {
                 logger.info('Settings', `Vibrations ${value ? 'activées' : 'désactivées'}`);
               }}
               trackColor={{ 
-                false: theme.colors.border || '#333', 
-                true: theme.colors.accent 
+                false: '#374151', 
+                true: '#3E7BFA' 
               }}
-              thumbColor={hapticsEnabled ? '#FFFFFF' : '#FFFFFF'}
+              thumbColor="#FFFFFF"
             />
           </View>
-        </View>
 
-        {/* Section Couleurs - Masquée car le Design System 2.0 utilise un thème fixe */}
-        {ENABLE_THEME_COLOR_SETTING && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Feather name="palette" size={20} color={theme.colors.accent} />
-              <Text style={styles.sectionTitle}>Couleurs</Text>
-            </View>
-            <Text style={styles.label}>Couleur principale</Text>
-            <TextInput
-              style={styles.input}
-              value={primaryColor}
-              onChangeText={setPrimaryColor}
-              placeholder="#1D4ED8"
-              placeholderTextColor={theme.colors.textMuted}
-            />
-          </View>
-        )}
+          <TouchableOpacity
+            style={[styles.saveButton, saving && { opacity: 0.6 }]}
+            onPress={saveSettings}
+            disabled={saving}
+            activeOpacity={0.7}
+          >
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <>
+                <Feather name="save" size={18} color="#FFFFFF" strokeWidth={2.5} />
+                <Text style={styles.saveButtonText}>Sauvegarder</Text>
+              </>
+            )}
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.saveButton, saving && { opacity: 0.6 }]}
-          onPress={saveSettings}
-          disabled={saving}
-          activeOpacity={0.7}
-        >
-          {saving ? (
-            <ActivityIndicator color={theme.colors.text} />
-          ) : (
-            <>
-              <Feather name="save" size={20} color={theme.colors.text} strokeWidth={2.5} />
-              <Text style={styles.saveButtonText}>Sauvegarder</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* Bouton Déconnexion */}
-        <TouchableOpacity
-          style={[styles.signOutButton, saving && { opacity: 0.6 }]}
-          onPress={async () => {
-            Alert.alert(
-              'Déconnexion',
-              'Êtes-vous sûr de vouloir vous déconnecter ?',
-              [
-                { text: 'Annuler', style: 'cancel' },
-                {
-                  text: 'Déconnexion',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await signOut();
-                      logger.info('Settings', 'Déconnexion réussie');
-                    } catch (err) {
-                      Alert.alert('Erreur', 'Impossible de se déconnecter');
-                    }
+          <TouchableOpacity
+            style={[styles.signOutButton, saving && { opacity: 0.6 }]}
+            onPress={async () => {
+              Alert.alert(
+                'Déconnexion',
+                'Êtes-vous sûr de vouloir vous déconnecter ?',
+                [
+                  { text: 'Annuler', style: 'cancel' },
+                  {
+                    text: 'Déconnexion',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await signOut();
+                        logger.info('Settings', 'Déconnexion réussie');
+                      } catch (err) {
+                        Alert.alert('Erreur', 'Impossible de se déconnecter');
+                      }
+                    },
                   },
-                },
-              ]
-            );
-          }}
-          disabled={saving}
-          activeOpacity={0.7}
-        >
-          <Feather name="log-out" size={20} color={theme.colors.error} strokeWidth={2.5} />
-          <Text style={styles.signOutButtonText}>Déconnexion</Text>
-        </TouchableOpacity>
+                ]
+              );
+            }}
+            disabled={saving}
+            activeOpacity={0.7}
+          >
+            <Feather name="log-out" size={18} color="#FFFFFF" strokeWidth={2.5} />
+            <Text style={styles.signOutButtonText}>Déconnexion</Text>
+          </TouchableOpacity>
 
-        {/* Bouton Supprimer mon compte */}
-        <TouchableOpacity
-          disabled={saving || deletingAccount}
-          style={[styles.deleteAccountButton, (saving || deletingAccount) && { opacity: 0.6 }]}
-          onPress={handleDeleteAccount}
-          activeOpacity={0.7}
-        >
-          <Feather name="trash-2" size={20} color="#FFFFFF" strokeWidth={2.5} />
-          <Text style={styles.deleteAccountButtonText}>Supprimer mon compte</Text>
-        </TouchableOpacity>
-
-        <View style={{ height: insets.bottom + 40 }} />
+          <TouchableOpacity
+            disabled={saving || deletingAccount}
+            style={[styles.deleteAccountButton, (saving || deletingAccount) && { opacity: 0.6 }]}
+            onPress={handleDeleteAccount}
+            activeOpacity={0.7}
+          >
+            <Feather name="trash-2" size={18} color="#FFFFFF" strokeWidth={2.5} />
+            <Text style={styles.deleteAccountButtonText}>Supprimer mon compte</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const getStyles = (theme, insets = { bottom: 0 }) => {
-  // Vérification de sécurité pour le thème
-  const spacing = theme.spacing || { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
-  const borderRadius = theme.borderRadius || { sm: 4, md: 8, lg: 12, xl: 16, round: 999 };
-  const typography = theme.typography || {};
-  const colors = theme.colors || {};
-  const buttons = theme.buttons || {};
-  const input = theme.input || {};
-  const shadows = theme.shadows || {};
-  
   return StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-  },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.lg,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backBtnText: {
-    ...typography.body,
-    fontWeight: '700',
-    marginLeft: spacing.xs,
-    color: colors.accent,
-  },
-  title: {
-    ...typography.h1,
-    fontSize: 32,
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    ...typography.bodySmall,
-  },
-  section: {
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  sectionTitle: {
-    ...typography.h4,
-    marginLeft: spacing.sm,
-  },
-  label: {
-    ...typography.caption,
-    marginBottom: spacing.sm,
-    color: colors.text,
-  },
-  input: {
-    ...input,
-    marginBottom: spacing.md,
-  },
-  helpText: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
-    lineHeight: 20,
-  },
-  logoContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoButton: {
-    width: 140,
-    height: 140,
-    borderWidth: 2,
-    borderColor: `${colors.accent}40`,
-    borderStyle: 'dashed',
-    borderRadius: borderRadius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-    overflow: 'hidden',
-  },
-  logoPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'contain',
-  },
-  logoText: {
-    ...typography.bodySmall,
-    marginTop: spacing.sm,
-    color: colors.textSecondary,
-  },
-  changeLogoButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: `${colors.accent}20`,
-    borderRadius: borderRadius.md,
-  },
-  changeLogoText: {
-    ...typography.caption,
-    color: colors.accent,
-    fontWeight: '700',
-  },
-  templateButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  templateButton: {
-    flex: 1,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceElevated,
-    alignItems: 'center',
-  },
-  templateButtonActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
-  templateButtonText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-  },
-  templateButtonTextActive: {
-    color: colors.text,
-  },
-  templateLinkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    gap: spacing.md,
-    marginTop: spacing.sm,
-  },
-  templateLinkText: {
-    ...typography.body,
-    flex: 1,
-    fontWeight: '600',
-  },
-  templateSelect: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    marginBottom: spacing.md,
-  },
-  templateSelectLabel: {
-    ...typography.body,
-    fontWeight: '500',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    borderTopLeftRadius: borderRadius.xl,
-    borderTopRightRadius: borderRadius.xl,
-    maxHeight: '80%',
-    paddingBottom: insets.bottom || spacing.lg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border || colors.textMuted + '30',
-  },
-  modalTitle: {
-    ...typography.h3,
-    fontWeight: '700',
-  },
-  modalCloseButton: {
-    padding: spacing.xs,
-  },
-  modalScrollView: {
-    maxHeight: 500,
-  },
-  templateOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    gap: spacing.md,
-  },
-  templatePreview: {
-    marginRight: spacing.sm,
-  },
-  templateOptionContent: {
-    flex: 1,
-  },
-  templateActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  previewButton: {
-    padding: spacing.xs,
-  },
-  templateOptionLabel: {
-    ...typography.body,
-    marginBottom: spacing.xs,
-  },
-  templateOptionDescription: {
-    ...typography.bodySmall,
-    fontSize: 12,
-  },
-  saveButton: {
-    ...buttons.primary,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-  saveButtonText: {
-    ...typography.body,
-    fontWeight: '700',
-    color: colors.text,
-    marginLeft: spacing.xs,
-  },
-  signOutButton: {
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 2,
-    borderColor: colors.error,
-    paddingVertical: 18,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-  },
-  signOutButtonText: {
-    ...typography.body,
-    fontWeight: '700',
-    color: colors.error,
-  },
-  deleteAccountButton: {
-    backgroundColor: '#DC2626', // Rouge danger foncé
-    paddingVertical: 18,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    borderWidth: 2,
-    borderColor: '#B91C1C', // Rouge très foncé
-    ...shadows.lg,
-  },
-  deleteAccountButtonText: {
-    ...typography.body,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    backgroundColor: colors.surfaceElevated || colors.surface,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.sm,
-  },
-  settingInfo: {
-    flex: 1,
-    marginRight: spacing.md,
-  },
-  settingLabel: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  settingDescription: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-    lineHeight: 18,
-  },
-  // ✅ Styles pour Picker (mentions légales)
-  pickerContainer: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.surface,
-    marginBottom: spacing.md,
-    overflow: 'hidden',
-  },
-  picker: {
-    color: colors.text,
-    backgroundColor: colors.surface,
-  },
+    container: {
+      flex: 1,
+      backgroundColor: '#0D0F12',
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 16,
+    },
+    backBtn: {
+      marginRight: 12,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    scrollView: {
+      flex: 1,
+    },
+    scrollContent: {
+      padding: 20,
+      paddingBottom: 40,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#0D0F12',
+    },
+    // Cards
+    card: {
+      backgroundColor: '#15171C',
+      borderRadius: 20,
+      padding: 20,
+      marginBottom: 24,
+      borderColor: 'rgba(255,255,255,0.05)',
+      borderWidth: 1,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 16,
+      gap: 10,
+    },
+    sectionTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#FFFFFF',
+      marginBottom: 8,
+      marginTop: 4,
+    },
+    input: {
+      backgroundColor: '#1C1F24',
+      borderRadius: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      color: '#FFFFFF',
+      marginBottom: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.05)',
+    },
+    // Logo
+    logoContainer: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 20,
+    },
+    logoButton: {
+      width: 100,
+      height: 100,
+      borderWidth: 2,
+      borderColor: 'rgba(62, 123, 250, 0.3)',
+      borderStyle: 'dashed',
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#1C1F24',
+      overflow: 'hidden',
+    },
+    logoPlaceholder: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    logoImage: {
+      width: '100%',
+      height: '100%',
+      resizeMode: 'contain',
+    },
+    logoText: {
+      fontSize: 12,
+      color: '#9CA3AF',
+      marginTop: 8,
+    },
+    changeLogoButton: {
+      marginTop: 12,
+      paddingVertical: 8,
+      paddingHorizontal: 16,
+    },
+    changeLogoText: {
+      fontSize: 13,
+      color: '#3E7BFA',
+      fontWeight: '600',
+    },
+    // Dropdown
+    dropdown: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: '#1C1F24',
+      borderRadius: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.05)',
+      marginBottom: 14,
+      height: 52,
+    },
+    dropdownText: {
+      fontSize: 16,
+      color: '#FFFFFF',
+      flex: 1,
+    },
+    dropdownContainer: {
+      backgroundColor: '#1C1F24',
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.05)',
+      marginBottom: 14,
+      overflow: 'hidden',
+      height: 52,
+    },
+    picker: {
+      color: '#FFFFFF',
+      backgroundColor: '#1C1F24',
+    },
+    // Import
+    importButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#3E7BFA',
+      borderRadius: 14,
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      gap: 10,
+      marginBottom: 12,
+    },
+    importButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    importInfo: {
+      fontSize: 13,
+      color: '#9CA3AF',
+      lineHeight: 18,
+    },
+    // Settings
+    settingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      backgroundColor: '#1C1F24',
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.05)',
+      marginTop: 4,
+      marginBottom: 14,
+    },
+    settingLabel: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    // Buttons
+    saveButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#3E7BFA',
+      borderRadius: 14,
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      marginTop: 8,
+      marginBottom: 12,
+      gap: 10,
+    },
+    saveButtonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    signOutButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#262B33',
+      borderRadius: 14,
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      marginBottom: 12,
+      gap: 10,
+    },
+    signOutButtonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    deleteAccountButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#D9534F',
+      borderRadius: 14,
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      marginBottom: 0,
+      gap: 10,
+    },
+    deleteAccountButtonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: '#15171C',
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      maxHeight: '80%',
+      paddingBottom: insets.bottom || 20,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingVertical: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    modalCloseButton: {
+      padding: 4,
+    },
+    modalScrollView: {
+      maxHeight: 500,
+    },
+    templateOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 20,
+      paddingVertical: 16,
+      marginHorizontal: 20,
+      marginTop: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      gap: 12,
+    },
+    templatePreview: {
+      marginRight: 8,
+    },
+    templateOptionContent: {
+      flex: 1,
+    },
+    templateActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    previewButton: {
+      padding: 4,
+    },
+    templateOptionLabel: {
+      fontSize: 16,
+      marginBottom: 4,
+    },
+    templateOptionDescription: {
+      fontSize: 12,
+      color: '#9CA3AF',
+    },
   });
 };

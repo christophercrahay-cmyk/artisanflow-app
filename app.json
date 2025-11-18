@@ -29,9 +29,9 @@
       "expo-asset"
     ],
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/logo/artisanflow-home-logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0F1115"
+      "backgroundColor": "#0D0F18"
     },
     "assetBundlePatterns": [
       "assets/**/*"
@@ -40,6 +40,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.acontrecourant.artisanflow",
       "buildNumber": "2",
+      "splash": {
+        "image": "./assets/logo/artisanflow-home-logo.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0D0F18"
+      },
       "infoPlist": {
         "NSMicrophoneUsageDescription": "ArtisanFlow enregistre des notes vocales pour documenter vos chantiers.",
         "NSCameraUsageDescription": "ArtisanFlow prend des photos pour documenter vos chantiers et suivre l'avancement des travaux.",
@@ -54,6 +59,11 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F1115"
+      },
+      "splash": {
+        "image": "./assets/logo/artisanflow-home-logo.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0D0F18"
       },
       "edgeToEdgeEnabled": true,
       "permissions": [

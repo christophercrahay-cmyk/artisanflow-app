@@ -5,6 +5,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { Feather } from '@expo/vector-icons';
 import { useSafeTheme } from '../theme/useSafeTheme';
 import { Animated } from 'react-native';
+import { COLORS } from '../theme/colors';
 
 // Écrans
 import ClientsListScreen from '../screens/ClientsListScreen2';
@@ -141,6 +142,7 @@ function AnimatedTabIcon({ name, color, size, focused }) {
   );
 }
 
+
 // Navigation principale avec 3 onglets
 function TabNavigator() {
   const insets = useSafeAreaInsets();
@@ -150,8 +152,8 @@ function TabNavigator() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: theme.colors.accent,
-        tabBarInactiveTintColor: theme.colors.textSecondary,
+        tabBarActiveTintColor: COLORS.primary,
+        tabBarInactiveTintColor: COLORS.iconSecondary,
         tabBarStyle: {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
@@ -172,7 +174,7 @@ function TabNavigator() {
         options={{
           tabBarLabel: 'Accueil',
           tabBarIcon: ({ color, size, focused }) => (
-            <AnimatedTabIcon name="camera" color={color} size={24} focused={focused} />
+            <AnimatedTabIcon name="home" color={color} size={24} focused={focused} />
           ),
         }}
       />

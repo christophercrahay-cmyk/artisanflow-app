@@ -371,10 +371,10 @@ export function buildDevisHTML({ number, dateISO, company, client, project, lign
   .legal-item { margin-bottom: 6px; padding-left: 0; }
   .legal-item strong { color: #374151; font-weight: 600; }
   .sign { margin-top: 28px; border:1px dashed #bbb; height: 80px; display:flex; align-items:center; justify-content:center; color:#777; border-radius: 8px; }
-  .signature-block { margin-top: 28px; border: 2px solid #333; border-radius: 8px; padding: 16px; background: #f9fafb; }
+  .signature-block { page-break-before: always; page-break-inside: avoid; margin-top: 20px; padding: 15px; border: 2px solid #333; border-radius: 8px; background: #f9fafb; }
   .signature-title { font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 12px; color: #111; }
   .signature-info { font-size: 11px; color: #555; margin-bottom: 8px; }
-  .signature-image { max-width: 200px; max-height: 80px; border: 1px solid #ddd; border-radius: 4px; margin-top: 8px; }
+  .signature-image { max-width: 400px; max-height: 200px; margin-top: 10px; border: 1px solid #ccc; border-radius: 4px; padding: 5px; filter: brightness(0) saturate(100%); }
 </style>
 </head>
 <body>
@@ -575,7 +575,14 @@ export async function generateDevisPDFFromDB(devisId) {
     // Récupérer les informations de signature si le devis est signé
     let signature = null;
     if (devis.signature_status === 'signed') {
-      // Récupérer la dernière signature
+      logger.info('PDF', '🔍 Devis signé détecté, récupération des infos de signature', {
+        devisId,
+        signed_by_name: devis.signed_by_name,
+        signed_at: devis.signed_at,
+        signature_image_url: devis.signature_image_url,
+      });
+
+      // Récupérer la dernière signature (si elle existe encore en base)
       const { data: signatureData } = await supabase
         .from('devis_signatures')
         .select('*')
@@ -584,22 +591,146 @@ export async function generateDevisPDFFromDB(devisId) {
         .limit(1)
         .maybeSingle();
 
-      if (signatureData) {
-        signature = {
-          signerName: devis.signed_by_name || signatureData.signer_name,
-          signerEmail: devis.signed_by_email || signatureData.signer_email,
-          signedAt: devis.signed_at || signatureData.signed_at,
-          signatureImageBase64: signatureData.signature_image_base64,
-        };
+      logger.info('PDF', '🔍 Signature data depuis devis_signatures', {
+        hasSignatureData: !!signatureData,
+        hasSignatureImageBase64: !!signatureData?.signature_image_base64,
+      });
+
+      const signerName = devis.signed_by_name || signatureData?.signer_name || null;
+      const signerEmail = devis.signed_by_email || signatureData?.signer_email || null;
+      const signedAt = devis.signed_at || signatureData?.signed_at || null;
+
+      // L'image peut venir soit de la table devis_signatures (data URL),
+      // soit de la colonne devis.signature_image_url (URL Storage générée par l'Edge Function)
+      const signatureImageSource =
+        signatureData?.signature_image_base64 ||
+        devis.signature_image_url ||
+        null;
+
+      logger.info('PDF', '🔍 Source image signature déterminée', {
+        signatureImageSource: signatureImageSource ? (signatureImageSource.substring(0, 50) + '...') : null,
+        isDataUrl: signatureImageSource?.startsWith('data:image') || false,
+        isHttpUrl: signatureImageSource?.startsWith('http') || false,
+      });
+
+      let signatureImageBase64 = null;
+
+      if (signatureImageSource) {
+        if (typeof signatureImageSource === 'string' && signatureImageSource.startsWith('data:image')) {
+          // Déjà une data URL prête à être injectée dans le PDF
+          logger.info('PDF', '✅ Signature déjà en data URL, utilisation directe');
+          signatureImageBase64 = signatureImageSource;
+        } else if (typeof signatureImageSource === 'string') {
+          // URL HTTP(s) vers Storage → extraire le path et générer une URL signée
+          logger.info('PDF', '🔍 DEBUT téléchargement signature depuis URL', {
+            url: signatureImageSource,
+            devisId,
+          });
+          try {
+            // Extraire le bucket et le path depuis l'URL publique Supabase Storage
+            // Format: https://{project-ref}.supabase.co/storage/v1/object/public/{bucket}/{path}
+            const urlMatch = signatureImageSource.match(/\/storage\/v1\/object\/public\/([^\/]+)\/(.+)$/);
+            let downloadUrl = signatureImageSource;
+            
+            if (urlMatch) {
+              const bucketName = urlMatch[1];
+              const filePath = urlMatch[2];
+              
+              logger.info('PDF', '🔍 Extraction path depuis URL publique', {
+                bucketName,
+                filePath,
+              });
+              
+              // Générer une URL signée (valide 1 heure)
+              const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+                .from(bucketName)
+                .createSignedUrl(filePath, 3600);
+              
+              if (signedUrlError) {
+                logger.error('PDF', '❌ Erreur génération URL signée', signedUrlError);
+                throw new Error(`Impossible de générer l'URL signée: ${signedUrlError.message}`);
+              }
+              
+              downloadUrl = signedUrlData.signedUrl;
+              logger.info('PDF', '✅ URL signée générée', {
+                originalUrl: signatureImageSource.substring(0, 80) + '...',
+                signedUrl: downloadUrl.substring(0, 80) + '...',
+              });
+            } else {
+              logger.warn('PDF', '⚠️ URL ne correspond pas au format Supabase Storage, utilisation directe', {
+                url: signatureImageSource,
+              });
+            }
+            
+            const fileName = `signature_${devisId}_${Date.now()}.png`;
+            const downloadPath = `${FileSystem.cacheDirectory}${fileName}`;
+
+            logger.info('PDF', '📥 Téléchargement en cours...', { downloadPath, downloadUrl: downloadUrl.substring(0, 80) + '...' });
+            const downloadRes = await FileSystem.downloadAsync(downloadUrl, downloadPath);
+            logger.info('PDF', '📥 Téléchargement terminé', { 
+              localUri: downloadRes.uri,
+              status: downloadRes.status,
+              headers: downloadRes.headers,
+            });
+
+            // Vérifier la taille du fichier téléchargé
+            const fileInfo = await FileSystem.getInfoAsync(downloadRes.uri);
+            logger.info('PDF', '📊 Info fichier téléchargé', {
+              exists: fileInfo.exists,
+              size: fileInfo.size,
+              isDirectory: fileInfo.isDirectory,
+            });
+
+            if (!fileInfo.exists || fileInfo.size === 0) {
+              throw new Error(`Fichier téléchargé vide ou inexistant (size: ${fileInfo.size})`);
+            }
+
+            const base64 = await FileSystem.readAsStringAsync(downloadRes.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+
+            // Vérifier la longueur du base64 (une image PNG devrait faire au moins quelques KB en base64)
+            logger.info('PDF', '🔍 Vérification base64', {
+              base64Length: base64?.length || 0,
+              base64Start: base64?.substring(0, 30) || '',
+              expectedMinSize: Math.ceil(fileInfo.size * 1.33), // Base64 = ~33% plus grand que binaire
+            });
+
+            signatureImageBase64 = `data:image/png;base64,${base64}`;
+            logger.info('PDF', '✅ Signature image téléchargée pour le PDF', {
+              originalUrl: signatureImageSource,
+              downloadUrl: downloadUrl.substring(0, 80) + '...',
+              localUri: downloadRes.uri,
+              fileSize: fileInfo.size,
+              base64Length: base64?.length || 0,
+            });
+          } catch (error) {
+            logger.error('PDF', '❌ Erreur chargement/encodage de la signature pour le PDF', {
+              error: error.message,
+              stack: error.stack,
+              url: signatureImageSource,
+            });
+          }
+        } else {
+          logger.warn('PDF', '⚠️ signatureImageSource n\'est pas une string', {
+            type: typeof signatureImageSource,
+            value: signatureImageSource,
+          });
+        }
       } else {
-        // Fallback sur les données du devis si pas de signature dans la table
-        signature = {
-          signerName: devis.signed_by_name,
-          signerEmail: devis.signed_by_email,
-          signedAt: devis.signed_at,
-          signatureImageBase64: null,
-        };
+        logger.warn('PDF', '⚠️ Aucune source d\'image de signature trouvée', {
+          hasSignatureData: !!signatureData,
+          hasSignatureImageBase64: !!signatureData?.signature_image_base64,
+          hasDevisSignatureImageUrl: !!devis.signature_image_url,
+        });
       }
+
+      signature = {
+        signerName,
+        signerEmail,
+        signedAt,
+        signatureImageBase64,
+      };
     }
 
     // 4. Formater les lignes pour le template

@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useThemeColors } from '../theme/theme2';
+import { ICON_COLORS } from '../theme/iconColors';
 
 export default function CollapsibleSection({
   title,
@@ -51,7 +52,7 @@ export default function CollapsibleSection({
           <Feather 
             name={icon} 
             size={18} 
-            color={theme.colors.accent} 
+            color={ICON_COLORS.primary} 
             style={{ marginRight: theme.spacing.xs }}
           />
           <Text style={[styles.title, { color: theme.colors.text }]}>
@@ -69,7 +70,7 @@ export default function CollapsibleSection({
             <Feather 
               name="chevron-down" 
               size={20} 
-              color={theme.colors.textMuted} 
+              color={ICON_COLORS.secondary} 
             />
           </Animated.View>
         </View>

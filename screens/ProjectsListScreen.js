@@ -13,14 +13,18 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../supabaseClient';
 import { useSafeTheme } from '../theme/useSafeTheme';
+import { COLORS } from '../theme/colors';
 import { getCurrentUser } from '../utils/auth';
 import logger from '../utils/logger';
 import EmptyState from '../components/EmptyState';
 import { showError } from '../components/Toast';
+import { useNetworkStatus } from '../contexts/NetworkStatusContext';
+import { cacheProjects, loadCachedProjects } from '../services/offlineCacheService';
 
 export default function ProjectsListScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const theme = useSafeTheme();
+  const { isOffline } = useNetworkStatus();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -34,6 +38,14 @@ export default function ProjectsListScreen({ navigation }) {
       const user = await getCurrentUser();
       if (!user) {
         logger.warn('ProjectsList', 'Pas de user connecté');
+        return;
+      }
+
+      // Si hors ligne, charger depuis le cache
+      if (isOffline) {
+        logger.info('ProjectsList', 'Mode hors ligne, chargement depuis cache');
+        const cachedProjects = await loadCachedProjects();
+        setProjects(cachedProjects);
         return;
       }
 
@@ -58,15 +70,34 @@ export default function ProjectsListScreen({ navigation }) {
 
       if (error) {
         logger.error('ProjectsList', 'Erreur chargement chantiers', error);
-        showError('Impossible de charger les chantiers');
+        // En cas d'erreur, essayer de charger depuis le cache
+        const cachedProjects = await loadCachedProjects();
+        if (cachedProjects.length > 0) {
+          logger.info('ProjectsList', 'Chargement depuis cache après erreur');
+          setProjects(cachedProjects);
+        } else {
+          showError('Impossible de charger les chantiers');
+        }
         return;
       }
 
       logger.info('ProjectsList', `${data?.length || 0} chantiers chargés`);
       setProjects(data || []);
+      
+      // Mettre à jour le cache
+      if (data && data.length > 0) {
+        await cacheProjects(data);
+      }
     } catch (err) {
       logger.error('ProjectsList', 'Exception chargement chantiers', err);
-      showError('Erreur lors du chargement des chantiers');
+      // En cas d'erreur, essayer de charger depuis le cache
+      const cachedProjects = await loadCachedProjects();
+      if (cachedProjects.length > 0) {
+        logger.info('ProjectsList', 'Chargement depuis cache après exception');
+        setProjects(cachedProjects);
+      } else {
+        showError('Erreur lors du chargement des chantiers');
+      }
     } finally {
       setLoading(false);
     }
@@ -199,7 +230,7 @@ export default function ProjectsListScreen({ navigation }) {
         </TouchableOpacity>
         <Text style={styles.title}>Chantiers</Text>
         <TouchableOpacity 
-          onPress={() => navigation.navigate('ClientsTab', { screen: 'ClientsList' })} 
+          onPress={() => navigation.navigate('Main', { screen: 'ClientsTab', params: { screen: 'ClientsList' } })} 
           style={styles.addButton}
         >
           <Feather name="plus" size={24} color={theme.colors.accent} strokeWidth={2.5} />
@@ -208,7 +239,7 @@ export default function ProjectsListScreen({ navigation }) {
 
       {/* Barre de recherche */}
       <View style={styles.searchContainer}>
-        <Feather name="search" size={20} color={theme.colors.textSecondary} />
+        <Feather name="search" size={20} color={COLORS.iconSecondary} />
         <TextInput
           style={styles.searchInput}
           placeholder="Rechercher un chantier..."

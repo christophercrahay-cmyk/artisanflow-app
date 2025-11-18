@@ -17,6 +17,10 @@ import logger from './utils/logger';
 import { OfflineManager } from './utils/offlineManager';
 import { supabase } from './supabaseClient';
 import { initRevenueCat } from './services/payments/revenuecat';
+import { ToastProvider } from './contexts/ToastContext';
+import { NetworkStatusProvider } from './contexts/NetworkStatusContext';
+import OfflineBanner from './components/common/OfflineBanner';
+import SyncManager from './components/SyncManager';
 
 // Initialiser Sentry dès le démarrage
 initSentry();
@@ -157,7 +161,11 @@ export default function App() {
     return (
       <ErrorBoundary>
         <SafeAreaProvider>
-          <OnboardingScreen onComplete={completeOnboarding} />
+          <NetworkStatusProvider>
+            <ToastProvider>
+              <OnboardingScreen onComplete={completeOnboarding} />
+            </ToastProvider>
+          </NetworkStatusProvider>
         </SafeAreaProvider>
       </ErrorBoundary>
     );
@@ -166,11 +174,17 @@ export default function App() {
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <NavigationContainer theme={CustomDarkTheme}>
-          {session ? <AppNavigator /> : <AuthScreen />}
-          <NetworkStatusBar />
-          <OfflineIndicator />
-        </NavigationContainer>
+        <NetworkStatusProvider>
+          <ToastProvider>
+            <NavigationContainer theme={CustomDarkTheme}>
+              {session ? <AppNavigator /> : <AuthScreen />}
+              <NetworkStatusBar />
+              <OfflineIndicator />
+              <OfflineBanner />
+              <SyncManager />
+            </NavigationContainer>
+          </ToastProvider>
+        </NetworkStatusProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
   );

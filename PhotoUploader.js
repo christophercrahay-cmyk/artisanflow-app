@@ -11,6 +11,12 @@ import { Feather } from '@expo/vector-icons';
 import { compressImage } from './services/imageCompression';
 import { showSuccess, showError } from './components/Toast';
 import logger from './utils/logger';
+import PhotoSourceModal from './components/PhotoSourceModal';
+import LocationPermissionModal from './components/LocationPermissionModal';
+import CameraPreviewModal from './components/CameraPreviewModal';
+import { useNetworkStatus } from './contexts/NetworkStatusContext';
+import { addToQueue } from './services/offlineQueueService';
+import * as FileSystem from 'expo-file-system';
 
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
@@ -25,6 +31,7 @@ export default function PhotoUploader({ projectId }) {
   const theme = useSafeTheme();
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
+  const { isOffline } = useNetworkStatus();
   const [photos, setPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -32,6 +39,17 @@ export default function PhotoUploader({ projectId }) {
   // États pour le visualiseur plein écran
   const [isViewerVisible, setIsViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  
+  // État pour la modal de sélection de source photo
+  const [isSourceModalVisible, setIsSourceModalVisible] = useState(false);
+  
+  // État pour la modal de permission de géolocalisation
+  const [isLocationModalVisible, setIsLocationModalVisible] = useState(false);
+  const [pendingPhotoUri, setPendingPhotoUri] = useState(null);
+  
+  // État pour la prévisualisation caméra
+  const [isCameraPreviewVisible, setIsCameraPreviewVisible] = useState(false);
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState(null);
 
   // ═══════════════════════════════════════════════════════════
   // FONCTION : CHARGER LES PHOTOS (VERROUILLÉE)
@@ -84,25 +102,8 @@ export default function PhotoUploader({ projectId }) {
       return;
     }
 
-    // ✅ Proposer le choix entre Caméra et Galerie
-    Alert.alert(
-      'Ajouter une photo',
-      'Choisissez la source de la photo',
-      [
-        {
-          text: 'Caméra',
-          onPress: () => pickFromCamera(),
-        },
-        {
-          text: 'Galerie',
-          onPress: () => pickFromGallery(),
-        },
-        {
-          text: 'Annuler',
-          style: 'cancel',
-        },
-      ]
-    );
+    // ✅ Ouvrir la modal personnalisée pour choisir la source
+    setIsSourceModalVisible(true);
   };
 
   const pickFromCamera = async () => {
@@ -113,18 +114,42 @@ export default function PhotoUploader({ projectId }) {
         return;
       }
 
+      // ✅ Ouvrir la caméra avec preview amélioré
       const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: false,
+        allowsEditing: false, // On gère le preview nous-mêmes
         quality: 0.8,
+        mediaTypes: ImagePicker.MediaType.Images,
       });
 
       if (result.canceled) {return;}
       
-      await processAndUploadPhoto(result.assets[0].uri);
+      // ✅ Afficher la prévisualisation avant upload
+      const photoUri = result.assets[0].uri;
+      setCapturedPhotoUri(photoUri);
+      setIsCameraPreviewVisible(true);
     } catch (err) {
       logger.error('PhotoUploader', 'Erreur capture caméra', err);
       showError('Erreur lors de la capture');
     }
+  };
+
+  // ✅ Confirmer la photo capturée et l'uploader
+  const handleConfirmPhoto = async () => {
+    if (capturedPhotoUri) {
+      setIsCameraPreviewVisible(false);
+      await processAndUploadPhoto(capturedPhotoUri);
+      setCapturedPhotoUri(null);
+    }
+  };
+
+  // ✅ Reprendre la photo (fermer preview et rouvrir caméra)
+  const handleRetakePhoto = () => {
+    setIsCameraPreviewVisible(false);
+    setCapturedPhotoUri(null);
+    // Rouvrir la caméra
+    setTimeout(() => {
+      pickFromCamera();
+    }, 300); // Petit délai pour la fermeture de la modal
   };
 
   const pickFromGallery = async () => {
@@ -136,7 +161,7 @@ export default function PhotoUploader({ projectId }) {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: false,
         quality: 0.8,
         allowsMultipleSelection: false,
@@ -152,15 +177,170 @@ export default function PhotoUploader({ projectId }) {
   };
 
   // ═══════════════════════════════════════════════════════════
+  // FONCTION : VÉRIFIER STATUT PERMISSION GÉOLOCALISATION
+  // ═══════════════════════════════════════════════════════════
+  const checkLocationPermissionStatus = async () => {
+    try {
+      const Location = await import('expo-location').then(mod => mod.default || mod);
+      
+      if (!Location || typeof Location.getForegroundPermissionsAsync !== 'function') {
+        return 'unavailable';
+      }
+
+      // Vérifier le statut actuel de la permission
+      const { status } = await Location.getForegroundPermissionsAsync();
+      
+      if (status === 'granted') {
+        return 'granted';
+      } else if (status === 'denied') {
+        return 'denied';
+      } else {
+        // Permission pas encore demandée → retourner 'undetermined' pour afficher la modal
+        return 'undetermined';
+      }
+    } catch (err) {
+      logger.debug('PhotoUploader', 'Module expo-location non disponible', err.message);
+      return 'unavailable';
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════
+  // FONCTION : TRAITER UNE PHOTO HORS LIGNE
+  // ═══════════════════════════════════════════════════════════
+  const processPhotoOffline = async (originalUri, skipLocationCheck = false) => {
+    try {
+      setUploading(true);
+      setUploadProgress(10);
+      
+      // Récupérer currentProject et currentClient depuis le store
+      const { currentProject, currentClient } = useAppStore.getState();
+      
+      if (!currentProject?.id) {
+        throw new Error('Aucun projet sélectionné');
+      }
+      
+      if (!currentClient?.id) {
+        throw new Error('Aucun client sélectionné');
+      }
+
+      // Compression de l'image
+      setUploadProgress(30);
+      const compressed = await compressImage(originalUri);
+      setUploadProgress(50);
+
+      // Créer le dossier photos s'il n'existe pas
+      const photosDir = `${FileSystem.documentDirectory}photos/`;
+      const dirInfo = await FileSystem.getInfoAsync(photosDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(photosDir, { intermediates: true });
+      }
+
+      // Copier la photo dans un chemin local persistant
+      const fileName = `photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.jpg`;
+      const localUri = `${photosDir}${fileName}`;
+      await FileSystem.copyAsync({
+        from: compressed.uri,
+        to: localUri,
+      });
+      setUploadProgress(70);
+
+      // Capturer la date/heure de prise de vue
+      const takenAt = new Date().toISOString();
+
+      // Récupérer la position GPS (optionnel, même hors ligne)
+      let latitude = null;
+      let longitude = null;
+      if (!skipLocationCheck) {
+        const permissionStatus = await checkLocationPermissionStatus();
+        if (permissionStatus === 'granted') {
+          try {
+            const Location = await import('expo-location').then(mod => mod.default || mod);
+            if (Location?.getCurrentPositionAsync) {
+              const location = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+                timeout: 10000,
+                maximumAge: 60000,
+              });
+              
+              if (location?.coords?.latitude && location?.coords?.longitude) {
+                const lat = location.coords.latitude;
+                const lng = location.coords.longitude;
+                
+                if (lat !== 0 && lng !== 0 && 
+                    lat >= -90 && lat <= 90 && 
+                    lng >= -180 && lng <= 180) {
+                  latitude = lat;
+                  longitude = lng;
+                }
+              }
+            }
+          } catch (locationErr) {
+            logger.warn('PhotoUploader', 'Erreur GPS hors ligne', locationErr.message);
+          }
+        }
+      }
+
+      // Ajouter à la queue
+      setUploadProgress(80);
+      const queueItem = await addToQueue({
+        type: 'photo',
+        data: {
+          localUri,
+          projectId: currentProject.id,
+          clientId: currentClient.id,
+          metadata: {
+            taken_at: takenAt,
+            latitude,
+            longitude,
+          },
+        },
+      });
+      setUploadProgress(90);
+
+      // Créer un objet photo local pour l'affichage immédiat
+      const localPhoto = {
+        id: queueItem.id,
+        project_id: currentProject.id,
+        client_id: currentClient.id,
+        url: localUri,
+        uri: localUri,
+        taken_at: takenAt,
+        latitude,
+        longitude,
+        synced: false,
+        created_at: takenAt,
+        isLocal: true, // Marqueur pour indiquer que c'est une photo locale
+      };
+
+      // Ajouter la photo à la liste immédiatement
+      setPhotos((prev) => [localPhoto, ...prev]);
+      setUploadProgress(100);
+      
+      showSuccess('Photo sauvegardée (synchronisation en attente)');
+      logger.info('PhotoUploader', `Photo sauvegardée hors ligne: ${queueItem.id}`);
+    } catch (err) {
+      logger.error('PhotoUploader', 'Erreur traitement photo hors ligne', err);
+      showError('Impossible de sauvegarder la photo');
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════
   // FONCTION : TRAITER ET UPLOADER UNE PHOTO (VERROUILLÉE)
   // ═══════════════════════════════════════════════════════════
   // - Compression de l'image
-  // - Capture GPS avec timeout
-  // - Upload vers Supabase Storage
+  // - Capture GPS avec timeout (si permission accordée)
+  // - Upload vers Supabase Storage (ou queue si hors ligne)
   // - Insertion en BDD avec géolocalisation
   // - Reverse geocoding en arrière-plan pour la ville
   // ═══════════════════════════════════════════════════════════
-  const processAndUploadPhoto = async (originalUri) => {
+  const processAndUploadPhoto = async (originalUri, skipLocationCheck = false) => {
+    // Si hors ligne, sauvegarder localement et ajouter à la queue
+    if (isOffline) {
+      return await processPhotoOffline(originalUri, skipLocationCheck);
+    }
     try {
       setUploading(true);
       setUploadProgress(0);
@@ -178,19 +358,37 @@ export default function PhotoUploader({ projectId }) {
       
       // La géolocalisation est OPTIONNELLE (module natif requis)
       // L'app fonctionne sans GPS, les photos sont juste sans coordonnées
-      try {
-        const Location = await import('expo-location').then(mod => mod.default || mod);
-        
-        if (Location && typeof Location.requestForegroundPermissionsAsync === 'function') {
-          const { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
+      if (!skipLocationCheck) {
+        try {
+          const Location = await import('expo-location').then(mod => mod.default || mod);
           
-          if (locationStatus === 'granted') {
-            try {
-              const location = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.Balanced,
-                timeout: 10000, // Timeout 10s pour laisser plus de temps
-                maximumAge: 60000, // Accepter une position jusqu'à 1 minute
-              });
+          if (Location && typeof Location.requestForegroundPermissionsAsync === 'function') {
+            // Vérifier d'abord le statut actuel
+            const permissionStatus = await checkLocationPermissionStatus();
+            
+            // Si permission pas encore demandée, on la demandera via la modal
+            if (permissionStatus === 'undetermined') {
+              setPendingPhotoUri(originalUri);
+              setIsLocationModalVisible(true);
+              setUploading(false);
+              setUploadProgress(0);
+              return; // Sortir et attendre la réponse de l'utilisateur
+            }
+            
+            // Si permission refusée, continuer sans GPS
+            if (permissionStatus === 'denied') {
+              logger.info('PhotoUploader', 'Permission de géolocalisation refusée, photo sans GPS');
+              // Continue sans GPS
+            }
+            
+            // Si permission accordée, récupérer la position
+            if (permissionStatus === 'granted') {
+              try {
+                const location = await Location.getCurrentPositionAsync({
+                  accuracy: Location.Accuracy.Balanced,
+                  timeout: 10000, // Timeout 10s pour laisser plus de temps
+                  maximumAge: 60000, // Accepter une position jusqu'à 1 minute
+                });
               
               // Vérifier que les coordonnées sont valides (pas 0,0 et dans des limites raisonnables)
               if (location?.coords?.latitude && location?.coords?.longitude) {
@@ -211,18 +409,17 @@ export default function PhotoUploader({ projectId }) {
                 } else {
                   logger.warn('PhotoUploader', 'Coordonnées GPS invalides (0,0 ou hors limites)');
                 }
+                }
+              } catch (locationErr) {
+                logger.warn('PhotoUploader', 'Erreur récupération position GPS', locationErr.message);
+                // Continue sans GPS
               }
-            } catch (locationErr) {
-              logger.warn('PhotoUploader', 'Erreur récupération position GPS', locationErr.message);
-              // Continue sans GPS
             }
-          } else {
-            logger.info('PhotoUploader', 'Permission de géolocalisation non accordée');
           }
+        } catch (importErr) {
+          // Module natif non disponible (Expo Go en dev) → normal, continue sans GPS
+          logger.debug('PhotoUploader', 'Module expo-location non disponible (normal en Expo Go)');
         }
-      } catch (importErr) {
-        // Module natif non disponible (Expo Go en dev) → normal, continue sans GPS
-        logger.debug('PhotoUploader', 'Module expo-location non disponible (normal en Expo Go)');
       }
       
       // Compression de l'image avant upload
@@ -535,6 +732,9 @@ export default function PhotoUploader({ projectId }) {
             logger.debug('PhotoUploader', `Photo ${item.id}: lat=${item.latitude}, lng=${item.longitude}, hasLocation=${hasLocation}`);
           }
 
+          // Vérifier si la photo est en attente de synchronisation
+          const isPendingSync = item.synced === false || item.isLocal === true;
+
           return (
             <View style={styles.photoContainer}>
               <TouchableOpacity
@@ -543,19 +743,27 @@ export default function PhotoUploader({ projectId }) {
                 onLongPress={() => deletePhoto(item.id, item.url)}
                 activeOpacity={0.7}
               >
-                <Image source={{ uri: item.url }} style={styles.photoImg} />
+                <Image source={{ uri: item.url || item.uri }} style={styles.photoImg} />
+                {/* Badge "en attente" pour photos non synchronisées */}
+                {isPendingSync && (
+                  <View style={styles.pendingBadge}>
+                    <Text style={styles.pendingBadgeText}>🔄 En attente</Text>
+                  </View>
+                )}
               </TouchableOpacity>
               {photoDate && (
                 <View style={styles.photoInfo}>
                   <Text style={styles.photoDateText}>{photoDate}</Text>
+                  {/* Badge géolocalisation : affiché UNIQUEMENT si coordonnées GPS valides */}
                   {hasLocation && (
                     <View style={styles.locationBadge}>
                       <Feather name="map-pin" size={10} color={theme.colors.accent} />
                       <Text style={styles.locationText}>
-                        {item.city || 'géolocalisée'}
+                        {item.city || 'Géolocalisé'}
                       </Text>
                     </View>
                   )}
+                  {/* Si pas de GPS : rien n'est affiché (pas de badge "Non géolocalisé") */}
                 </View>
               )}
             </View>
@@ -563,6 +771,72 @@ export default function PhotoUploader({ projectId }) {
         }}
         ListEmptyComponent={<Text style={styles.empty}>Aucune photo</Text>}
         columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
+      />
+
+      {/* Modal de sélection de source photo */}
+      <PhotoSourceModal
+        visible={isSourceModalVisible}
+        onClose={() => setIsSourceModalVisible(false)}
+        onCamera={pickFromCamera}
+        onGallery={pickFromGallery}
+      />
+
+      {/* Modal de prévisualisation caméra */}
+      <CameraPreviewModal
+        visible={isCameraPreviewVisible}
+        photoUri={capturedPhotoUri}
+        onConfirm={handleConfirmPhoto}
+        onRetake={handleRetakePhoto}
+        onClose={() => {
+          setIsCameraPreviewVisible(false);
+          setCapturedPhotoUri(null);
+        }}
+      />
+
+      {/* Modal d'explication permission géolocalisation */}
+      <LocationPermissionModal
+        visible={isLocationModalVisible}
+        onClose={() => {
+          setIsLocationModalVisible(false);
+          // Si l'utilisateur ferme sans choisir, continuer sans GPS
+          if (pendingPhotoUri) {
+            processAndUploadPhoto(pendingPhotoUri, true);
+            setPendingPhotoUri(null);
+          }
+        }}
+        onAllow={async () => {
+          // L'utilisateur accepte → demander la permission et continuer
+          if (pendingPhotoUri) {
+            try {
+              const Location = await import('expo-location').then(mod => mod.default || mod);
+              if (Location && typeof Location.requestForegroundPermissionsAsync === 'function') {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status === 'granted') {
+                  // Permission accordée, continuer avec GPS
+                  await processAndUploadPhoto(pendingPhotoUri, false);
+                } else {
+                  // Permission refusée, continuer sans GPS
+                  await processAndUploadPhoto(pendingPhotoUri, true);
+                }
+              } else {
+                // Module non disponible, continuer sans GPS
+                await processAndUploadPhoto(pendingPhotoUri, true);
+              }
+            } catch (err) {
+              logger.warn('PhotoUploader', 'Erreur demande permission GPS', err);
+              // En cas d'erreur, continuer sans GPS
+              await processAndUploadPhoto(pendingPhotoUri, true);
+            }
+            setPendingPhotoUri(null);
+          }
+        }}
+        onDeny={() => {
+          // L'utilisateur refuse → continuer sans GPS
+          if (pendingPhotoUri) {
+            processAndUploadPhoto(pendingPhotoUri, true);
+            setPendingPhotoUri(null);
+          }
+        }}
       />
 
       {/* Visualiseur plein écran */}
@@ -704,6 +978,21 @@ const getStyles = (theme) => StyleSheet.create({
     fontSize: 10,
     color: theme.colors.accent,
     fontStyle: 'italic',
+  },
+  pendingBadge: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: '#F59E0B', // Orange
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    zIndex: 10,
+  },
+  pendingBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   empty: { 
     ...theme.typography.bodySmall,

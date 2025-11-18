@@ -40,9 +40,9 @@ module.exports = {
     ],
     
     splash: {
-      image: './assets/splash-icon.png',
+      image: './assets/logo/artisanflow-home-logo.png',
       resizeMode: 'contain',
-      backgroundColor: '#0F1115',
+      backgroundColor: '#0D0F18',
     },
     
     assetBundlePatterns: ['assets/**/*'],
@@ -52,6 +52,11 @@ module.exports = {
       // Bundle identifier différent pour DEV
       bundleIdentifier: IS_DEV ? 'com.artisanflow.dev' : 'com.acontrecourant.artisanflow',
       buildNumber: '2',
+      splash: {
+        image: './assets/logo/artisanflow-home-logo.png',
+        resizeMode: 'contain',
+        backgroundColor: '#0D0F18',
+      },
       infoPlist: {
         NSMicrophoneUsageDescription: 'ArtisanFlow enregistre des notes vocales pour documenter vos chantiers.',
         NSCameraUsageDescription: 'ArtisanFlow prend des photos pour documenter vos chantiers et suivre l\'avancement des travaux.',
@@ -66,6 +71,11 @@ module.exports = {
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0F1115',
+      },
+      splash: {
+        image: './assets/logo/artisanflow-home-logo.png',
+        resizeMode: 'contain',
+        backgroundColor: '#0D0F18',
       },
       edgeToEdgeEnabled: true,
       permissions: [
@@ -98,6 +108,9 @@ module.exports = {
       eas: {
         projectId: 'ef12de05-654e-4cc5-be14-26fc25571879',
       },
+      // Base URL pour les liens de partage de chantier
+      // Peut être surchargée par EXPO_PUBLIC_SHARE_BASE_URL
+      shareBaseUrl: process.env.EXPO_PUBLIC_SHARE_BASE_URL || 'https://magnificent-bonbon-b7534e.netlify.app',
     },
     
     owner: 'chriskreepz',

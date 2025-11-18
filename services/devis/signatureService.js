@@ -83,8 +83,9 @@ export async function generateSignatureLink(devisId) {
       return finalUrl;
     }
 
-    // 2) Générer un nouveau token sécurisé
-    const signatureToken = crypto.randomUUID ? crypto.randomUUID() : generateUUID();
+    // 2) Générer un nouveau token sécurisé (compatible React Native)
+    // Pas de crypto.randomUUID dans Hermes → on utilise toujours generateUUID()
+    const signatureToken = generateUUID();
 
     // 3) Créer une entrée dans devis_signature_links (source de vérité pour l'Edge Function)
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 jours
@@ -102,16 +103,17 @@ export async function generateSignatureLink(devisId) {
       throw new Error('Impossible de créer le lien de signature');
     }
 
-    // 4) Mettre à jour le devis avec le statut 'pending' (optionnel pour affichage)
+    // 4) Mettre à jour le devis avec le statut 'envoye' (synchronisation statut + signature_status)
     const { error: updateError } = await supabase
       .from('devis')
       .update({
+        statut: 'envoye',
         signature_status: 'pending',
       })
       .eq('id', devisId);
 
     if (updateError) {
-      logger.error('SignatureService', 'Erreur mise à jour devis (signature_status)', updateError);
+      logger.error('SignatureService', 'Erreur mise à jour devis (statut/signature_status)', updateError);
       // On ne jette pas l'erreur ici car le lien est créé; on laisse quand même l'utilisateur utiliser le lien
     }
 
@@ -205,10 +207,11 @@ export async function markDevisAsSigned({
       throw new Error('Impossible d\'enregistrer la signature');
     }
 
-    // Mettre à jour le devis
+    // Mettre à jour le devis (synchronisation statut + signature_status)
     const { error: updateError } = await supabase
       .from('devis')
       .update({
+        statut: 'signe',
         signature_status: 'signed',
         signed_at: new Date().toISOString(),
         signed_by_name: signerName.trim(),

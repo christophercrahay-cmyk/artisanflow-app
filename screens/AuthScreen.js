@@ -16,6 +16,7 @@ import { signIn, signUp } from '../utils/auth';
 import logger from '../utils/logger';
 import { useSafeTheme } from '../theme/useSafeTheme';
 import { Feather } from '@expo/vector-icons';
+import { AFInput } from '../components/ui';
 
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
@@ -157,26 +158,20 @@ export default function AuthScreen() {
               {isSignUp ? 'Créer un compte' : 'Connexion'}
             </Text>
 
-            <View style={styles.inputContainer}>
-              <Feather name="mail" size={20} color={theme.colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Email"
-                placeholderTextColor={theme.colors.textMuted}
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                autoComplete="email"
-              />
-            </View>
+            <AFInput
+              icon="mail"
+              placeholder="Email"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+            />
 
-            <View style={styles.inputContainer}>
-              <Feather name="lock" size={20} color={theme.colors.textSecondary} />
-              <TextInput
-                style={styles.input}
+            <View style={{ position: 'relative' }}>
+              <AFInput
+                icon="lock"
                 placeholder="Mot de passe"
-                placeholderTextColor={theme.colors.textMuted}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -184,7 +179,12 @@ export default function AuthScreen() {
               />
               <TouchableOpacity
                 onPress={() => setShowPassword(!showPassword)}
-                style={styles.eyeButton}
+                style={{
+                  position: 'absolute',
+                  right: 16,
+                  top: Platform.OS === 'ios' ? 14 : 12,
+                  padding: 4,
+                }}
                 activeOpacity={0.7}
               >
                 <Feather

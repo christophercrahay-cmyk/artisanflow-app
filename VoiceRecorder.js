@@ -229,9 +229,12 @@ export default function VoiceRecorder({ projectId }) {
 
       logger.success('VoiceRecorder', `Upload réussi - Fichier: ${fileName}`, { projectId, clientId: currentClient.id });
 
-      // ÉTAPE 1 : Upload fichier audio
+      // Le fichier est déjà uploadé, on a le storagePath
+      const storagePath = up?.path || fileName;
+
+      // ÉTAPE 1 : Transcription
       setIsTranscribing(true);
-      setTranscriptionStatus('Upload du fichier audio vers le cloud...');
+      setTranscriptionStatus('Transcription en cours avec Whisper IA...');
       setTranscriptionProgress(10);
 
       let transcribedText = '';
@@ -247,11 +250,12 @@ export default function VoiceRecorder({ projectId }) {
           return;
         }
 
-        // ÉTAPE 2 : Transcription Whisper (texte brut)
+        // ÉTAPE 2 : Transcription Whisper (texte brut) via Edge Function
         setTranscriptionProgress(33);
         setTranscriptionStatus('Transcription en cours avec Whisper IA...');
         
-        const rawText = await transcribeAudio(recordUri);
+        // ✅ Utiliser le storagePath déjà uploadé (plus besoin d'uploader à nouveau)
+        const rawText = await transcribeAudio(null, storagePath);
         logger.info('VoiceRecorder', `Transcription brute: ${rawText}`);
         
         // ÉTAPE 3 : Correction orthographique avec GPT

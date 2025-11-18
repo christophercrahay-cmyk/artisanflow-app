@@ -30,8 +30,7 @@ interface DevisJSON {
 
 interface AIResponse {
   status: "questions" | "ready" | "error";
-  devis?: DevisJSON; // Pour compatibilité avec devis
-  facture?: DevisJSON; // Pour factures (même structure que devis)
+  devis: DevisJSON;
   questions: string[];
   session_id: string;
   tour_count: number;
@@ -64,10 +63,7 @@ serve(async (req) => {
     }
 
     // Parser la requête
-    const { action, session_id, transcription, notes, reponses, project_id, client_id, user_id, type, devis_id } = await req.json();
-    
-    // Type par défaut : devis (pour compatibilité)
-    const documentType = type || 'devis';
+    const { action, session_id, transcription, notes, reponses, project_id, client_id, user_id } = await req.json();
 
     // Récupérer le token d'authentification depuis les headers
     const authHeader = req.headers.get("authorization");
@@ -89,13 +85,13 @@ serve(async (req) => {
     // Router selon l'action
     switch (action) {
       case "start":
-        return await handleStart(supabase, { transcription, notes, project_id, client_id, user_id, type: documentType, devis_id });
+        return await handleStart(supabase, { transcription, notes, project_id, client_id, user_id });
       
       case "answer":
-        return await handleAnswer(supabase, { session_id, reponses, type: documentType });
+        return await handleAnswer(supabase, { session_id, reponses });
       
       case "finalize":
-        return await handleFinalize(supabase, { session_id, type: documentType });
+        return await handleFinalize(supabase, { session_id });
       
       default:
         throw new Error(`Action inconnue : ${action}`);
@@ -118,9 +114,9 @@ serve(async (req) => {
 // ============================================
 
 async function handleStart(supabase: any, data: any) {
-  const { transcription, notes, project_id, client_id, user_id, type = 'devis', devis_id } = data;
+  const { transcription, notes, project_id, client_id, user_id } = data;
 
-  console.log(`🚀 Démarrage session IA ${type} pour user:`, user_id);
+  console.log("🚀 Démarrage session IA pour user:", user_id);
   
   // Si notes fournies, les compiler en une seule transcription
   let fullTranscription = transcription || '';
@@ -130,24 +126,6 @@ async function handleStart(supabase: any, data: any) {
       const date = new Date(note.created_at).toLocaleDateString('fr-FR');
       return `[Note ${index + 1} - ${date}]\n${note.transcription}`;
     }).join('\n\n');
-  }
-
-  // Si facture et devis_id fourni, ajouter le contexte du devis
-  if (type === 'facture' && devis_id) {
-    const { data: devis } = await supabase
-      .from('devis')
-      .select('*, devis_lignes(*)')
-      .eq('id', devis_id)
-      .single();
-    
-    if (devis) {
-      const devisContext = `\n\n[CONTEXTE DEVIS ${devis.numero}]\n` +
-        `Montant TTC: ${devis.montant_ttc}€\n` +
-        `Statut: ${devis.statut}\n` +
-        (devis.devis_lignes?.length > 0 ? 
-          `Lignes:\n${devis.devis_lignes.map((l: any) => `- ${l.description}: ${l.prix_total}€`).join('\n')}\n` : '');
-      fullTranscription = devisContext + '\n' + fullTranscription;
-    }
   }
 
   // Créer une nouvelle session
@@ -162,12 +140,9 @@ async function handleStart(supabase: any, data: any) {
         transcription_initiale: fullTranscription,
         reponses_artisan: [],
         notes_count: notes?.length || 0,
-        type: type, // Stocker le type dans le contexte
-        devis_id: devis_id || null,
       },
       status: "pending",
       tour_count: 0,
-      type: type, // Stocker le type dans la session
     })
     .select()
     .single();
@@ -179,7 +154,7 @@ async function handleStart(supabase: any, data: any) {
   console.log("✅ Session créée:", session.id);
 
   // Analyser la transcription avec GPT
-  const aiResult = await analyzeTranscriptionWithGPT(fullTranscription, null, 1, type);
+  const aiResult = await analyzeTranscriptionWithGPT(fullTranscription, null, 1);
 
   // Sauvegarder le devis temporaire
   const { error: tempError } = await supabase
@@ -218,20 +193,14 @@ async function handleStart(supabase: any, data: any) {
 
   console.log(`✅ Session ${session.id} → ${newStatus}`);
 
-  // Retourner la réponse selon le type
+  // Retourner la réponse
   const response: AIResponse = {
     status: newStatus,
+    devis: aiResult.devis,
     questions: aiResult.questions,
     session_id: session.id,
     tour_count: 1,
   };
-
-  // Ajouter devis ou facture selon le type
-  if (type === 'facture') {
-    response.facture = aiResult.devis; // Même structure, juste le nom change
-  } else {
-    response.devis = aiResult.devis;
-  }
 
   return new Response(JSON.stringify(response), {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
@@ -243,7 +212,7 @@ async function handleStart(supabase: any, data: any) {
 // ============================================
 
 async function handleAnswer(supabase: any, data: any) {
-  const { session_id, reponses, type = 'devis' } = data;
+  const { session_id, reponses } = data;
 
   console.log("💬 Réponses reçues pour session:", session_id);
 
@@ -257,9 +226,6 @@ async function handleAnswer(supabase: any, data: any) {
   if (sessionError || !session) {
     throw new Error("Session introuvable");
   }
-
-  // Récupérer le type depuis la session si non fourni
-  const documentType = type || session.type || 'devis';
 
   // Vérifier le nombre de tours
   if (session.tour_count >= MAX_TOURS) {
@@ -288,8 +254,7 @@ async function handleAnswer(supabase: any, data: any) {
   const aiResult = await analyzeTranscriptionWithGPT(
     context.transcription_initiale,
     { previousDevis: lastDevis.json_devis, reponses },
-    newTourCount,
-    documentType
+    newTourCount
   );
 
   // Sauvegarder la nouvelle version du devis
@@ -330,20 +295,14 @@ async function handleAnswer(supabase: any, data: any) {
 
   console.log(`✅ Session ${session_id} → Tour ${newTourCount} → ${newStatus}`);
 
-  // Retourner la réponse selon le type
+  // Retourner la réponse
   const response: AIResponse = {
     status: newStatus,
+    devis: aiResult.devis,
     questions: aiResult.questions,
     session_id,
     tour_count: newTourCount,
   };
-
-  // Ajouter devis ou facture selon le type
-  if (documentType === 'facture') {
-    response.facture = aiResult.devis;
-  } else {
-    response.devis = aiResult.devis;
-  }
 
   return new Response(JSON.stringify(response), {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
@@ -355,20 +314,11 @@ async function handleAnswer(supabase: any, data: any) {
 // ============================================
 
 async function handleFinalize(supabase: any, data: any) {
-  const { session_id, type } = data;
+  const { session_id } = data;
 
   console.log("✅ Finalisation session:", session_id);
 
-  // Récupérer la session pour connaître le type
-  const { data: session } = await supabase
-    .from("devis_ai_sessions")
-    .select("type")
-    .eq("id", session_id)
-    .single();
-
-  const documentType = type || session?.type || 'devis';
-
-  // Récupérer le dernier devis/facture temporaire
+  // Récupérer le dernier devis
   const { data: lastDevis, error: devisError } = await supabase
     .from("devis_temp_ai")
     .select("*")
@@ -378,7 +328,7 @@ async function handleFinalize(supabase: any, data: any) {
     .single();
 
   if (devisError) {
-    throw new Error("Document temporaire introuvable");
+    throw new Error("Devis temporaire introuvable");
   }
 
   // Marquer comme validé
@@ -398,20 +348,14 @@ async function handleFinalize(supabase: any, data: any) {
 
   console.log(`✅ Session ${session_id} finalisée`);
 
-  // Retourner le document final selon le type
+  // Retourner le devis final
   const response: AIResponse = {
     status: "ready",
+    devis: lastDevis.json_devis,
     questions: [],
     session_id,
     tour_count: lastDevis.version,
   };
-
-  // Ajouter devis ou facture selon le type
-  if (documentType === 'facture') {
-    response.facture = lastDevis.json_devis;
-  } else {
-    response.devis = lastDevis.json_devis;
-  }
 
   return new Response(JSON.stringify(response), {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
@@ -425,34 +369,13 @@ async function handleFinalize(supabase: any, data: any) {
 async function analyzeTranscriptionWithGPT(
   transcription: string,
   context: { previousDevis?: DevisJSON; reponses?: string[] } | null,
-  tourNumber: number,
-  type: string = 'devis'
+  tourNumber: number
 ): Promise<{ devis: DevisJSON; questions: string[] }> {
   
-  const documentType = type === 'facture' ? 'facture' : 'devis';
-  console.log(`🤖 Appel GPT-4o-mini (Tour ${tourNumber}, Type: ${documentType})`);
+  console.log(`🤖 Appel GPT-4o-mini (Tour ${tourNumber})`);
 
-  // Construire le prompt selon le type
-  let systemPrompt = type === 'facture' 
-    ? `Tu es un expert en facturation pour tous types de prestations professionnelles en France (bâtiment, services, artisanat, etc.).
-Ton rôle est de transformer une note vocale en facture structurée et professionnelle.
-
-RÈGLES IMPORTANTES :
-1. Génère des prix réalistes basés sur les tarifs moyens français 2025 pour le secteur concerné
-2. Une facture est généralement basée sur un devis accepté ou des travaux réalisés
-3. Pose des questions GÉNÉRIQUES et PERTINENTES si des informations critiques manquent
-4. Maximum 5 questions par tour
-5. Si tu as assez d'infos, ne pose AUCUNE question (questions_clarification = [])
-6. Utilise les unités appropriées : unité, m², ml, forfait, heure, jour, kg, etc.
-7. Adapte-toi au type de prestation (électricité, plomberie, peinture, conseil, formation, etc.)
-
-QUESTIONS GÉNÉRIQUES À POSER SI NÉCESSAIRE :
-- Quels travaux ont été effectivement réalisés ?
-- Y a-t-il des modifications par rapport au devis initial ?
-- Des prestations supplémentaires ont-elles été ajoutées ?
-- Le matériel/fournitures sont-ils inclus dans le prix ?
-- Y a-t-il des acomptes ou paiements partiels à déduire ?`
-    : `Tu es un expert en devis pour tous types de prestations professionnelles en France (bâtiment, services, artisanat, etc.).
+  // Construire le prompt
+  let systemPrompt = `Tu es un expert en devis pour tous types de prestations professionnelles en France (bâtiment, services, artisanat, etc.).
 Ton rôle est de transformer une note vocale en devis structuré et professionnel.
 
 RÈGLES IMPORTANTES :
@@ -468,7 +391,7 @@ QUESTIONS GÉNÉRIQUES À POSER SI NÉCESSAIRE :
 - Pouvez-vous préciser les quantités pour chaque élément ?
 - Y a-t-il des contraintes particulières ? (délais, accès, normes, finitions, etc.)
 - Le matériel/fournitures sont-ils inclus ou fournis par le client ?
-- Quel est le niveau de finition ou de qualité souhaité ?`;
+- Quel est le niveau de finition ou de qualité souhaité ?
 
 FORMAT DE SORTIE (JSON strict) :
 {
@@ -492,19 +415,9 @@ FORMAT DE SORTIE (JSON strict) :
 
   let userPrompt = "";
 
-  const documentLabel = type === 'facture' ? 'facture' : 'devis';
-  const documentLabelCapitalized = type === 'facture' ? 'Facture' : 'Devis';
-
   if (tourNumber === 1) {
     // Premier tour : analyse initiale
-    userPrompt = type === 'facture'
-      ? `Analyse cette note vocale et génère une facture professionnelle :
-
-"${transcription}"
-
-Si des informations critiques manquent pour établir une facture précise, pose des questions génériques et pertinentes.
-Sinon, génère une facture complète sans questions.`
-      : `Analyse cette note vocale et génère un devis professionnel :
+    userPrompt = `Analyse cette note vocale et génère un devis professionnel :
 
 "${transcription}"
 
@@ -515,16 +428,16 @@ Sinon, génère un devis complet sans questions.`;
     userPrompt = `CONTEXTE :
 Transcription initiale : "${transcription}"
 
-${documentLabelCapitalized.toUpperCase()} PRÉCÉDENT :
+DEVIS PRÉCÉDENT :
 ${JSON.stringify(context?.previousDevis, null, 2)}
 
 RÉPONSES DU PROFESSIONNEL :
 ${context?.reponses?.join("\n")}
 
 TÂCHE :
-Mets à jour le ${documentLabel} en intégrant les réponses.
+Mets à jour le devis en intégrant les réponses.
 Si tu as besoin de clarifications supplémentaires, pose des questions génériques (max 5).
-Sinon, retourne un ${documentLabel} final sans questions.`;
+Sinon, retourne un devis final sans questions.`;
   }
 
   // Appel à l'API OpenAI

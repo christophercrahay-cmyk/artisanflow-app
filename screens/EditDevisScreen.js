@@ -25,11 +25,12 @@ import { supabase } from '../supabaseClient';
 import { showSuccess, showError } from '../components/Toast';
 import { getErrorMessage } from '../utils/errorMessages';
 import logger from '../utils/logger';
-import { ScreenContainer } from '../components/ui';
+import { ScreenContainer, AFInput } from '../components/ui';
+import AFModal from '../components/ui/AFModal';
 import { generateSignatureLink, getDevisSignatureInfo } from '../services/devis/signatureService';
-// Note: expo-clipboard n'est pas installé, utiliser Clipboard API native si disponible
-// Pour l'instant, on utilise Alert avec le texte à copier manuellement
+import { finalizeDevis, unfinalizeDevis } from '../services/devis/devisService';
 import * as Sharing from 'expo-sharing';
+import * as Clipboard from 'expo-clipboard';
 import { generateDevisPDFFromDB } from '../utils/utils/pdf';
 
 export default function EditDevisScreen({ route, navigation }) {
@@ -43,6 +44,12 @@ export default function EditDevisScreen({ route, navigation }) {
   const [editingLigneId, setEditingLigneId] = useState(null);
   const [signatureInfo, setSignatureInfo] = useState(null);
   const [generatingLink, setGeneratingLink] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  // États pour les modales
+  const [showFinalizeModal, setShowFinalizeModal] = useState(false);
+  const [showUnfinalizeModal, setShowUnfinalizeModal] = useState(false);
+  const [showDeleteLigneModal, setShowDeleteLigneModal] = useState(false);
+  const [ligneToDelete, setLigneToDelete] = useState(null);
 
   const styles = useMemo(() => getStyles(theme), [theme]);
 
@@ -254,12 +261,19 @@ export default function EditDevisScreen({ route, navigation }) {
           },
           {
             text: 'Copier le lien',
-            onPress: () => {
-              // TODO: Installer expo-clipboard ou utiliser une alternative
-              Alert.alert('Lien de signature', link, [
-                { text: 'OK' },
-              ]);
-              showSuccess('Lien affiché (à copier manuellement)');
+            onPress: async () => {
+              try {
+                await Clipboard.setStringAsync(link);
+                showSuccess('Lien copié dans le presse-papiers !');
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              } catch (error) {
+                console.error('Erreur copie presse-papiers:', error);
+                // Fallback : afficher le lien si la copie échoue
+                Alert.alert('Lien de signature', link, [
+                  { text: 'OK' },
+                ]);
+                showError('Impossible de copier automatiquement. Lien affiché ci-dessus.');
+              }
             },
           },
           {
@@ -286,6 +300,71 @@ export default function EditDevisScreen({ route, navigation }) {
     }
   };
 
+  // Finaliser le devis (edition → pret)
+  const handleFinalizeDevis = async () => {
+    try {
+      setFinalizing(true);
+      
+      // Vérifier qu'il y a au moins une ligne
+      if (!lignes || lignes.length === 0) {
+        showError('Vous devez ajouter au moins une ligne avant de finaliser le devis.');
+        return;
+      }
+
+      // Afficher la modal de confirmation
+      setShowFinalizeModal(true);
+    } catch (error) {
+      logger.error('EditDevisScreen', 'Erreur finalisation devis', error);
+      showError('Erreur lors de la finalisation');
+    } finally {
+      setFinalizing(false);
+    }
+  };
+
+  // Annuler la finalisation (pret → edition)
+  const handleUnfinalizeDevis = async () => {
+    setShowUnfinalizeModal(true);
+  };
+
+  const confirmUnfinalize = async () => {
+    try {
+      setShowUnfinalizeModal(false);
+      const result = await unfinalizeDevis(devisId);
+      
+      if (result.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        showSuccess('Devis remis en édition');
+        await loadDevis();
+      } else {
+        showError(result.error || 'Impossible de revenir en édition');
+      }
+    } catch (error) {
+      logger.error('EditDevisScreen', 'Erreur annulation finalisation', error);
+      showError('Erreur lors de l\'annulation');
+    }
+  };
+
+  const confirmFinalize = async () => {
+    try {
+      setShowFinalizeModal(false);
+      setFinalizing(true);
+      const result = await finalizeDevis(devisId);
+      
+      if (result.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        showSuccess('Devis finalisé avec succès');
+        await loadDevis();
+      } else {
+        showError(result.error || 'Impossible de finaliser le devis');
+      }
+    } catch (error) {
+      logger.error('EditDevisScreen', 'Erreur finalisation devis', error);
+      showError('Erreur lors de la finalisation');
+    } finally {
+      setFinalizing(false);
+    }
+  };
+
   // Voir le PDF signé
   const handleViewSignedPDF = async () => {
     try {
@@ -304,38 +383,34 @@ export default function EditDevisScreen({ route, navigation }) {
   };
 
   const deleteLigne = (ligneId) => {
-    Alert.alert(
-      'Supprimer cette ligne ?',
-      'Cette action est irréversible.',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Supprimer',
-          style: 'destructive',
-          onPress: async () => {
-            // Si c'est une ligne temporaire, juste la retirer de la liste
-            if (ligneId.startsWith('temp-')) {
-              setLignes(lignes.filter(l => l.id !== ligneId));
-              return;
-            }
+    setLigneToDelete(ligneId);
+    setShowDeleteLigneModal(true);
+  };
 
-            // Sinon, supprimer de la base
-            try {
-              const { error } = await supabase
-                .from('devis_lignes')
-                .delete()
-                .eq('id', ligneId);
+  const confirmDeleteLigne = async () => {
+    const ligneId = ligneToDelete;
+    setShowDeleteLigneModal(false);
+    setLigneToDelete(null);
 
-              if (error) throw error;
-              setLignes(lignes.filter(l => l.id !== ligneId));
-              showSuccess('Ligne supprimée');
-            } catch (error) {
-              showError(getErrorMessage(error, 'delete'));
-            }
-          },
-        },
-      ]
-    );
+    // Si c'est une ligne temporaire, juste la retirer de la liste
+    if (ligneId.startsWith('temp-')) {
+      setLignes(lignes.filter(l => l.id !== ligneId));
+      return;
+    }
+
+    // Sinon, supprimer de la base
+    try {
+      const { error } = await supabase
+        .from('devis_lignes')
+        .delete()
+        .eq('id', ligneId);
+
+      if (error) throw error;
+      setLignes(lignes.filter(l => l.id !== ligneId));
+      showSuccess('Ligne supprimée');
+    } catch (error) {
+      showError(getErrorMessage(error, 'delete'));
+    }
   };
 
   if (loading) {
@@ -389,33 +464,50 @@ export default function EditDevisScreen({ route, navigation }) {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Section Signature */}
+          {/* Section Statut et Workflow */}
           <View style={[styles.section, { backgroundColor: theme.colors.surfaceAlt }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              Signature électronique
+              Statut du devis
             </Text>
             
             {/* Badge de statut */}
             <View style={styles.signatureStatusContainer}>
-              {devis?.signature_status === 'signed' ? (
+              {devis?.statut === 'edition' && (
+                <View style={[styles.statusBadge, { backgroundColor: theme.colors.info + '20' }]}>
+                  <Feather name="edit-3" size={16} color={theme.colors.info} />
+                  <Text style={[styles.statusText, { color: theme.colors.info }]}>
+                    En édition
+                  </Text>
+                </View>
+              )}
+              {devis?.statut === 'pret' && (
+                <View style={[styles.statusBadge, { backgroundColor: theme.colors.warning + '20' }]}>
+                  <Feather name="check" size={16} color={theme.colors.warning} />
+                  <Text style={[styles.statusText, { color: theme.colors.warning }]}>
+                    Prêt à envoyer
+                  </Text>
+                </View>
+              )}
+              {devis?.statut === 'envoye' && (
+                <View style={[styles.statusBadge, { backgroundColor: theme.colors.primary + '20' }]}>
+                  <Feather name="send" size={16} color={theme.colors.primary} />
+                  <Text style={[styles.statusText, { color: theme.colors.primary }]}>
+                    Envoyé - En attente de signature
+                  </Text>
+                </View>
+              )}
+              {devis?.statut === 'signe' && (
                 <View style={[styles.statusBadge, { backgroundColor: theme.colors.success + '20' }]}>
                   <Feather name="check-circle" size={16} color={theme.colors.success} />
                   <Text style={[styles.statusText, { color: theme.colors.success }]}>
                     Signé le {devis.signed_at ? new Date(devis.signed_at).toLocaleDateString('fr-FR') : ''}
                   </Text>
                 </View>
-              ) : (
-                <View style={[styles.statusBadge, { backgroundColor: theme.colors.warning + '20' }]}>
-                  <Feather name="clock" size={16} color={theme.colors.warning} />
-                  <Text style={[styles.statusText, { color: theme.colors.warning }]}>
-                    En attente de signature
-                  </Text>
-                </View>
               )}
             </View>
 
             {/* Informations de signature si signé */}
-            {devis?.signature_status === 'signed' && devis.signed_by_name && (
+            {devis?.statut === 'signe' && devis.signed_by_name && (
               <View style={styles.signatureDetails}>
                 <Text style={[styles.signatureDetailText, { color: theme.colors.textMuted }]}>
                   Signé par : <Text style={{ fontWeight: '600' }}>{devis.signed_by_name}</Text>
@@ -428,9 +520,65 @@ export default function EditDevisScreen({ route, navigation }) {
               </View>
             )}
 
-            {/* Boutons d'action */}
+            {/* Boutons d'action selon le statut */}
             <View style={styles.signatureActions}>
-              {devis?.signature_status !== 'signed' && (
+              {/* STATUT: EDITION → Bouton "Finaliser" */}
+              {devis?.statut === 'edition' && (
+                <TouchableOpacity
+                  style={[styles.signatureButton, { backgroundColor: theme.colors.success }]}
+                  onPress={handleFinalizeDevis}
+                  disabled={finalizing || lignes.length === 0}
+                >
+                  {finalizing ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Feather name="check" size={18} color="#FFFFFF" />
+                      <Text style={styles.signatureButtonText}>
+                        Finaliser le devis
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+
+              {/* STATUT: PRET → Boutons "Générer lien" + "Revenir en édition" */}
+              {devis?.statut === 'pret' && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.signatureButton, { backgroundColor: theme.colors.primary }]}
+                    onPress={handleGenerateSignatureLink}
+                    disabled={generatingLink}
+                  >
+                    {generatingLink ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Feather name="send" size={18} color="#FFFFFF" />
+                        <Text style={styles.signatureButtonText}>
+                          Générer le lien de signature
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.signatureButtonSecondary, { 
+                      borderColor: theme.colors.border,
+                      backgroundColor: theme.colors.surface,
+                    }]}
+                    onPress={handleUnfinalizeDevis}
+                  >
+                    <Feather name="edit-3" size={18} color={theme.colors.textMuted} />
+                    <Text style={[styles.signatureButtonSecondaryText, { color: theme.colors.textMuted }]}>
+                      Revenir en édition
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* STATUT: ENVOYE → Bouton "Renvoyer le lien" */}
+              {devis?.statut === 'envoye' && (
                 <TouchableOpacity
                   style={[styles.signatureButton, { backgroundColor: theme.colors.primary }]}
                   onPress={handleGenerateSignatureLink}
@@ -440,16 +588,17 @@ export default function EditDevisScreen({ route, navigation }) {
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
                     <>
-                      <Feather name="link" size={18} color="#FFFFFF" />
+                      <Feather name="refresh-cw" size={18} color="#FFFFFF" />
                       <Text style={styles.signatureButtonText}>
-                        Générer le lien de signature
+                        Renvoyer le lien
                       </Text>
                     </>
                   )}
                 </TouchableOpacity>
               )}
               
-              {devis?.signature_status === 'signed' && (
+              {/* STATUT: SIGNE → Bouton "Voir le PDF signé" */}
+              {devis?.statut === 'signe' && (
                 <TouchableOpacity
                   style={[styles.signatureButton, { backgroundColor: theme.colors.success }]}
                   onPress={handleViewSignedPDF}
@@ -461,6 +610,23 @@ export default function EditDevisScreen({ route, navigation }) {
                 </TouchableOpacity>
               )}
             </View>
+
+            {/* Message d'aide selon le statut */}
+            {devis?.statut === 'edition' && (
+              <Text style={[styles.helpText, { color: theme.colors.textMuted }]}>
+                💡 Finalisez le devis pour pouvoir l'envoyer au client
+              </Text>
+            )}
+            {devis?.statut === 'pret' && (
+              <Text style={[styles.helpText, { color: theme.colors.textMuted }]}>
+                💡 Générez le lien de signature et envoyez-le à votre client
+              </Text>
+            )}
+            {devis?.statut === 'envoye' && (
+              <Text style={[styles.helpText, { color: theme.colors.textMuted }]}>
+                ⏳ En attente de la signature du client
+              </Text>
+            )}
           </View>
 
           {/* TVA */}
@@ -468,12 +634,8 @@ export default function EditDevisScreen({ route, navigation }) {
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
               TVA (%)
             </Text>
-            <TextInput
-              style={[styles.tvaInput, {
-                backgroundColor: theme.colors.surface,
-                borderColor: theme.colors.border,
-                color: theme.colors.text,
-              }]}
+            <AFInput
+              icon="percent"
               value={tvaPercent.toString()}
               onChangeText={(text) => {
                 const num = parseFloat(text) || 0;
@@ -483,6 +645,7 @@ export default function EditDevisScreen({ route, navigation }) {
               }}
               keyboardType="numeric"
               placeholder="20"
+              containerStyle={{ marginBottom: 0 }}
             />
           </View>
 
@@ -558,28 +721,63 @@ export default function EditDevisScreen({ route, navigation }) {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Modales */}
+      <AFModal
+        visible={showFinalizeModal}
+        title="Finaliser le devis ?"
+        message="Le devis sera marqué comme prêt à envoyer. Vous pourrez ensuite générer le lien de signature.\n\nVous pourrez toujours revenir en édition si nécessaire."
+        onCancel={() => setShowFinalizeModal(false)}
+        onConfirm={confirmFinalize}
+        confirmLabel={finalizing ? 'Finalisation...' : 'Finaliser'}
+        cancelLabel="Annuler"
+      />
+
+      <AFModal
+        visible={showUnfinalizeModal}
+        title="Revenir en édition ?"
+        message="Le devis repassera en mode édition. Le lien de signature (si généré) restera valide."
+        onCancel={() => setShowUnfinalizeModal(false)}
+        onConfirm={confirmUnfinalize}
+        confirmLabel="Revenir en édition"
+        cancelLabel="Annuler"
+      />
+
+      <AFModal
+        visible={showDeleteLigneModal}
+        title="Supprimer cette ligne ?"
+        message="Cette action est irréversible."
+        onCancel={() => {
+          setShowDeleteLigneModal(false);
+          setLigneToDelete(null);
+        }}
+        onConfirm={confirmDeleteLigne}
+        confirmLabel="Supprimer"
+        cancelLabel="Annuler"
+        danger={true}
+      />
     </ScreenContainer>
   );
 }
 
 // Composant pour une ligne de devis
 function LigneItem({ ligne, index, theme, styles, isEditing, onEdit, onSave, onUpdate, onDelete }) {
-  const [localDescription, setLocalDescription] = useState(ligne.description);
-  const [localQuantite, setLocalQuantite] = useState(ligne.quantite.toString());
-  const [localUnite, setLocalUnite] = useState(ligne.unite);
-  const [localPrix, setLocalPrix] = useState(ligne.prix_unitaire.toString());
+  const [localDescription, setLocalDescription] = useState(ligne.description || '');
+  const [localQuantite, setLocalQuantite] = useState(ligne.quantite?.toString() || '1');
+  const [localUnite, setLocalUnite] = useState(ligne.unite || 'unité');
+  const [localPrix, setLocalPrix] = useState(ligne.prix_unitaire?.toString() || '0');
 
   useEffect(() => {
-    setLocalDescription(ligne.description);
-    setLocalQuantite(ligne.quantite.toString());
-    setLocalUnite(ligne.unite);
-    setLocalPrix(ligne.prix_unitaire.toString());
+    setLocalDescription(ligne.description || '');
+    setLocalQuantite(ligne.quantite?.toString() || '1');
+    setLocalUnite(ligne.unite || 'unité');
+    setLocalPrix(ligne.prix_unitaire?.toString() || '0');
   }, [ligne]);
 
   const handleSave = () => {
-    onUpdate('description', localDescription);
+    onUpdate('description', localDescription || '');
     onUpdate('quantite', parseFloat(localQuantite) || 0);
-    onUpdate('unite', localUnite);
+    onUpdate('unite', localUnite || 'unité');
     onUpdate('prix_unitaire', parseFloat(localPrix) || 0);
     onSave();
   };
@@ -590,27 +788,19 @@ function LigneItem({ ligne, index, theme, styles, isEditing, onEdit, onSave, onU
     <View style={[styles.ligneCard, { backgroundColor: theme.colors.surfaceAlt }]}>
       {isEditing ? (
         <>
-          <TextInput
-            style={[styles.input, {
-              backgroundColor: theme.colors.surface,
-              borderColor: theme.colors.border,
-              color: theme.colors.text,
-            }]}
+          <AFInput
+            icon="file-text"
             value={localDescription}
             onChangeText={setLocalDescription}
             placeholder="Description"
-            placeholderTextColor={theme.colors.textMuted}
             multiline
+            containerStyle={{ marginBottom: 12 }}
           />
           <View style={styles.ligneInputsRow}>
             <View style={styles.inputGroup}>
               <Text style={[styles.inputLabel, { color: theme.colors.textMuted }]}>Qté</Text>
-              <TextInput
-                style={[styles.inputSmall, {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.border,
-                  color: theme.colors.text,
-                }]}
+              <AFInput
+                icon="hash"
                 value={localQuantite}
                 onChangeText={(text) => {
                   setLocalQuantite(text);
@@ -618,32 +808,26 @@ function LigneItem({ ligne, index, theme, styles, isEditing, onEdit, onSave, onU
                 }}
                 keyboardType="numeric"
                 placeholder="1"
+                containerStyle={{ marginBottom: 0 }}
               />
             </View>
             <View style={styles.inputGroup}>
               <Text style={[styles.inputLabel, { color: theme.colors.textMuted }]}>Unité</Text>
-              <TextInput
-                style={[styles.inputSmall, {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.border,
-                  color: theme.colors.text,
-                }]}
+              <AFInput
+                icon="ruler"
                 value={localUnite}
                 onChangeText={(text) => {
                   setLocalUnite(text);
                   onUpdate('unite', text);
                 }}
                 placeholder="unité"
+                containerStyle={{ marginBottom: 0 }}
               />
             </View>
             <View style={styles.inputGroup}>
               <Text style={[styles.inputLabel, { color: theme.colors.textMuted }]}>Prix unit.</Text>
-              <TextInput
-                style={[styles.inputSmall, {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.border,
-                  color: theme.colors.text,
-                }]}
+              <AFInput
+                icon="euro"
                 value={localPrix}
                 onChangeText={(text) => {
                   setLocalPrix(text);
@@ -651,6 +835,7 @@ function LigneItem({ ligne, index, theme, styles, isEditing, onEdit, onSave, onU
                 }}
                 keyboardType="numeric"
                 placeholder="0.00"
+                containerStyle={{ marginBottom: 0 }}
               />
             </View>
           </View>
@@ -685,10 +870,10 @@ function LigneItem({ ligne, index, theme, styles, isEditing, onEdit, onSave, onU
           </View>
           <View style={styles.ligneDetails}>
             <Text style={[styles.ligneDetailText, { color: theme.colors.textMuted }]}>
-              {ligne.quantite} {ligne.unite} × {ligne.prix_unitaire.toFixed(2)} €
+              {ligne.quantite || 0} {ligne.unite || 'unité'} × {(ligne.prix_unitaire || 0).toFixed(2)} €
             </Text>
             <Text style={[styles.ligneTotal, { color: theme.colors.text }]}>
-              {ligne.prix_total.toFixed(2)} €
+              {(ligne.prix_total || 0).toFixed(2)} €
             </Text>
           </View>
         </>
@@ -947,6 +1132,27 @@ const getStyles = (theme) => StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  signatureButtonSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.xs,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    marginTop: theme.spacing.sm,
+  },
+  signatureButtonSecondaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  helpText: {
+    fontSize: 12,
+    marginTop: theme.spacing.md,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
 });
 

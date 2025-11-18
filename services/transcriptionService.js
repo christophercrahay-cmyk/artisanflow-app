@@ -1,52 +1,104 @@
 // services/transcriptionService.js
-// Import conditionnel de la config OpenAI
-let OPENAI_CONFIG = { apiKey: null, apiUrl: 'https://api.openai.com/v1', models: { whisper: 'whisper-1', gpt: 'gpt-4o-mini' } };
-try {
-  const openaiModule = require('../config/openai');
-  OPENAI_CONFIG = openaiModule.OPENAI_CONFIG || OPENAI_CONFIG;
-} catch (e) {
-  // Config absente, utiliser valeurs par défaut
-}
+// ✅ SÉCURISÉ : Utilise Edge Functions Supabase au lieu d'appeler OpenAI directement
+
+import { supabase } from '../supabaseClient';
+import * as FileSystem from 'expo-file-system/legacy';
+
+// URL de l'Edge Function (construite depuis le client Supabase)
+const getEdgeFunctionUrl = () => {
+  const supabaseUrl = supabase.supabaseUrl;
+  if (!supabaseUrl) {
+    throw new Error('URL Supabase non disponible dans le client');
+  }
+  return `${supabaseUrl}/functions/v1/transcribe-audio`;
+};
 
 /**
- * Transcrit un audio avec Whisper API
- * @param {string} audioUri - Chemin vers le fichier audio M4A
+ * Transcrit un audio avec Whisper API via Edge Function
+ * @param {string} audioUri - Chemin vers le fichier audio M4A (local ou Storage)
+ * @param {string} storagePath - Chemin dans Supabase Storage (optionnel, si déjà uploadé)
  * @returns {Promise<string>} Texte transcrit
  */
-export const transcribeAudio = async (audioUri) => {
+export const transcribeAudio = async (audioUri, storagePath = null) => {
   try {
     console.log('[Transcription] Début:', audioUri);
     
-    const formData = new FormData();
-    formData.append('file', {
-      uri: audioUri,
-      type: 'audio/m4a',
-      name: 'audio.m4a'
-    });
-    formData.append('model', OPENAI_CONFIG.models.whisper);
-    formData.append('language', 'fr');
-    formData.append('response_format', 'json');
-    
-    const response = await fetch(
-      `${OPENAI_CONFIG.apiUrl}/audio/transcriptions`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_CONFIG.apiKey}`,
-        },
-        body: formData
-      }
-    );
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Whisper API error: ${error.error?.message || response.status}`);
+    // Récupérer la session d'authentification
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session) {
+      throw new Error('Utilisateur non authentifié');
     }
-    
+
+    let filePath = storagePath;
+
+    // Si pas de storagePath fourni, uploader le fichier local vers Storage
+    if (!filePath && audioUri) {
+      console.log('[Transcription] Upload du fichier vers Storage...');
+      
+      // Lire le fichier local
+      const fileInfo = await FileSystem.getInfoAsync(audioUri);
+      if (!fileInfo.exists) {
+        throw new Error(`Fichier audio introuvable: ${audioUri}`);
+      }
+
+      const fileContent = await FileSystem.readAsStringAsync(audioUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // Convertir Base64 en Uint8Array
+      const binaryString = atob(fileContent);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // Upload vers Storage
+      const fileName = `transcribe_${Date.now()}.m4a`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('voices')
+        .upload(fileName, bytes, {
+          contentType: 'audio/m4a',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new Error(`Erreur upload Storage: ${uploadError.message}`);
+      }
+
+      filePath = uploadData.path;
+      console.log('[Transcription] Fichier uploadé:', filePath);
+    }
+
+    if (!filePath) {
+      throw new Error('Aucun fichier audio fourni (audioUri ou storagePath requis)');
+    }
+
+    // Appel Edge Function
+    const edgeFunctionUrl = getEdgeFunctionUrl();
+    const response = await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filePath: filePath,
+        language: 'fr',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'TRANSCRIBE_FAILED', message: response.statusText }));
+      const errorMessage = errorData.message || errorData.error || `Erreur ${response.status}`;
+      throw new Error(`Erreur transcription: ${errorMessage}`);
+    }
+
     const data = await response.json();
-    console.log('[Transcription] Succès:', data.text);
+    const transcription = data.transcription || '';
     
-    return data.text;
+    console.log('[Transcription] ✅ Succès:', transcription.substring(0, 50) + '...');
+    
+    return transcription;
     
   } catch (error) {
     console.error('[Transcription] Erreur:', error);
@@ -55,7 +107,7 @@ export const transcribeAudio = async (audioUri) => {
 };
 
 /**
- * Corrige l'orthographe et la grammaire d'une transcription
+ * Corrige l'orthographe et la grammaire d'une transcription via Edge Function
  * @param {string} text - Texte brut de Whisper
  * @returns {Promise<string>} Texte corrigé
  */
@@ -67,56 +119,44 @@ export const correctNoteText = async (text) => {
     if (!text || !text.trim() || text.trim().length < 3) {
       return text;
     }
-    
-    // Appel à GPT-4o-mini pour correction orthographique
-    const response = await fetch(
-      `${OPENAI_CONFIG.apiUrl}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_CONFIG.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: OPENAI_CONFIG.models.gpt, // 'gpt-4o-mini'
-          messages: [
-            {
-              role: 'system',
-              content: `Tu es un correcteur orthographique pour des notes vocales d'artisans du bâtiment.
 
-RÈGLES STRICTES :
-1. Corrige UNIQUEMENT l'orthographe, les accords et la ponctuation
-2. NE CHANGE PAS le sens ni la formulation
-3. NE REFORMULE PAS les phrases
-4. Garde le style oral et naturel
-5. Renvoie UNIQUEMENT le texte corrigé, sans explications ni commentaires
-
-Exemples :
-- "y faut changer 3 prise dan la cuissine" → "Il faut changer 3 prises dans la cuisine"
-- "jai refait lelectricite du salon" → "J'ai refait l'électricité du salon"
-- "8 prise 3 interrupteur" → "8 prises, 3 interrupteurs"
-- "faut prevoir cable et gaine" → "Il faut prévoir câble et gaine"`
-            },
-            {
-              role: 'user',
-              content: text
-            }
-          ],
-          temperature: 0.3, // Peu de créativité pour rester fidèle
-          max_tokens: 500,
-        })
-      }
-    );
-    
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`GPT API error: ${errorData.error?.message || response.status}`);
+    // Récupérer la session d'authentification
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session) {
+      console.warn('[Correction] Utilisateur non authentifié, retour du texte original');
+      return text;
     }
-    
+
+    // Appel Edge Function
+    const supabaseUrl = supabase.supabaseUrl;
+    if (!supabaseUrl) {
+      throw new Error('URL Supabase non disponible dans le client');
+    }
+
+    const edgeFunctionUrl = `${supabaseUrl}/functions/v1/correct-text`;
+    const response = await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: text,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'CORRECT_FAILED', message: response.statusText }));
+      const errorMessage = errorData.message || errorData.error || `Erreur ${response.status}`;
+      // En cas d'erreur, retourner le texte original (pas de throw)
+      console.warn(`[Correction] Erreur Edge Function: ${errorMessage}`);
+      return text;
+    }
+
     const data = await response.json();
-    const correctedText = data.choices[0]?.message?.content?.trim() || text;
+    const correctedText = data.correctedText || text;
     
-    console.log('[Correction] Texte corrigé:', correctedText);
+    console.log('[Correction] ✅ Texte corrigé:', correctedText.substring(0, 50) + '...');
     
     return correctedText;
     

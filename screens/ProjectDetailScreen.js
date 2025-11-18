@@ -18,6 +18,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import * as Sharing from 'expo-sharing';
+import * as Clipboard from 'expo-clipboard';
 import { supabase } from '../supabaseClient';
 import { useAppStore } from '../store/useAppStore';
 import PhotoUploader from '../PhotoUploader';
@@ -29,8 +30,26 @@ import CollapsibleSection from '../components/CollapsibleSection';
 import { useSafeTheme } from '../theme/useSafeTheme';
 import { Feather } from '@expo/vector-icons';
 import logger from '../utils/logger';
+import { ICON_COLORS } from '../theme/iconColors';
+import { COLORS } from '../theme/colors';
+import { modalComponentStyles } from '../theme/modalStyles';
+import AFModal from '../components/ui/AFModal';
+import { AFInput } from '../components/ui';
+
+// Palette de couleurs locale (pour compatibilité avec le code existant)
+const LOCAL_COLORS = {
+  background: '#020817',
+  textPrimary: '#F9FAFB',
+  textSecondary: '#9CA3AF',
+  blue: '#3B82F6',
+  cardBg: 'rgba(15,23,42,0.95)',
+  cardBorder: 'rgba(148,163,184,0.18)',
+  activeBadgeBg: 'rgba(34,197,94,0.16)',
+  activeBadgeText: '#22C55E',
+};
 import { showSuccess, showError } from '../components/Toast';
 import { getCurrentUser } from '../utils/auth';
+import { getOrCreateProjectShareLink } from '../services/projectShareService';
 
 export default function ProjectDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
@@ -41,11 +60,14 @@ export default function ProjectDetailScreen({ route, navigation }) {
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [showUnarchiveModal, setShowUnarchiveModal] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
   const [notesRefreshKey, setNotesRefreshKey] = useState(0);
   const [showTextNoteModal, setShowTextNoteModal] = useState(false);
   const [textNote, setTextNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
 
   const styles = useMemo(() => getStyles(theme), [theme]);
 
@@ -176,76 +198,52 @@ export default function ProjectDetailScreen({ route, navigation }) {
   };
 
   const handleArchiveProject = async () => {
-    Alert.alert(
-      'Archiver le chantier',
-      `Voulez-vous archiver "${project.name}" ?\n\nLe chantier sera masqué mais conservé dans l'historique.`,
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Archiver',
-          style: 'default',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('projects')
-                .update({
-                  archived: true,
-                  archived_at: new Date().toISOString(),
-                })
-                .eq('id', projectId);
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({
+          archived: true,
+          archived_at: new Date().toISOString(),
+        })
+        .eq('id', projectId);
 
-              if (error) {
-                showError('Impossible d\'archiver le chantier');
-                return;
-              }
+      if (error) {
+        showError('Impossible d\'archiver le chantier');
+        return;
+      }
 
-              // ✅ Nettoyer le store pour éviter le cache
-              useAppStore.getState().clearProject();
-              
-              showSuccess('Chantier archivé');
-              navigation.goBack();
-            } catch (err) {
-              showError('Erreur lors de l\'archivage');
-            }
-          },
-        },
-      ]
-    );
+      // ✅ Nettoyer le store pour éviter le cache
+      useAppStore.getState().clearProject();
+      
+      showSuccess('Chantier archivé');
+      setShowArchiveModal(false);
+      navigation.goBack();
+    } catch (err) {
+      showError('Erreur lors de l\'archivage');
+    }
   };
 
   const handleUnarchiveProject = async () => {
-    Alert.alert(
-      'Désarchiver le chantier',
-      `Voulez-vous restaurer "${project.name}" ?\n\nLe chantier redeviendra visible dans vos listes.`,
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Désarchiver',
-          style: 'default',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('projects')
-                .update({
-                  archived: false,
-                  archived_at: null,
-                })
-                .eq('id', projectId);
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({
+          archived: false,
+          archived_at: null,
+        })
+        .eq('id', projectId);
 
-              if (error) {
-                showError('Impossible de désarchiver le chantier');
-                return;
-              }
+      if (error) {
+        showError('Impossible de désarchiver le chantier');
+        return;
+      }
 
-              showSuccess('Chantier restauré');
-              await loadData(); // Recharger pour mettre à jour l'affichage
-            } catch (err) {
-              showError('Erreur lors de la restauration');
-            }
-          },
-        },
-      ]
-    );
+      showSuccess('Chantier restauré');
+      setShowUnarchiveModal(false);
+      await loadData(); // Recharger pour mettre à jour l'affichage
+    } catch (err) {
+      showError('Erreur lors de la restauration');
+    }
   };
 
   const handleDeleteProject = () => {
@@ -337,6 +335,52 @@ export default function ProjectDetailScreen({ route, navigation }) {
     }
   };
 
+  const handleShare = async () => {
+    try {
+      setShareLoading(true);
+      logger.info('ProjectDetail', 'Génération lien de partage', { projectId });
+
+      const url = await getOrCreateProjectShareLink(projectId);
+
+      // Copier l'URL dans le presse-papier
+      await Clipboard.setStringAsync(url);
+
+      // Afficher un message de succès avec option de partage
+      Alert.alert(
+        'Lien de partage généré',
+        `Le lien a été copié dans le presse-papier.\n\n${url}\n\nVous pouvez maintenant le partager via SMS, Email, WhatsApp, etc.`,
+        [
+          {
+            text: 'Partager maintenant',
+            onPress: async () => {
+              // Essayer d'ouvrir le menu de partage natif via SMS (qui accepte le texte)
+              const message = `Voici le lien de suivi de votre chantier : ${url}`;
+              const smsUrl = `sms:?body=${encodeURIComponent(message)}`;
+              const canOpen = await Linking.canOpenURL(smsUrl);
+              if (canOpen) {
+                await Linking.openURL(smsUrl);
+              } else {
+                // Fallback : afficher le message
+                showSuccess('Lien copié ! Collez-le dans votre application de messagerie.');
+              }
+            },
+          },
+          {
+            text: 'OK',
+            style: 'cancel',
+          },
+        ]
+      );
+
+      logger.success('ProjectDetail', 'Lien de partage généré et copié', { url });
+    } catch (error) {
+      logger.error('ProjectDetail', 'Erreur partage chantier', error);
+      showError(error.message || 'Impossible de générer le lien de partage pour le moment.');
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
   const getStatusConfig = (status) => {
     switch (status) {
       case 'active':
@@ -375,7 +419,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
             }}
             activeOpacity={0.7}
           >
-            <Feather name="arrow-left" size={24} color={theme.colors.text} strokeWidth={2.5} />
+            <Feather name="arrow-left" size={24} color={LOCAL_COLORS.textPrimary} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
         <View style={{ flex: 1, justifyContent: 'center' }}>
@@ -467,43 +511,56 @@ export default function ProjectDetailScreen({ route, navigation }) {
               onPress={handleGoBack}
               activeOpacity={0.7}
             >
-              <Feather name="arrow-left" size={24} color={theme.colors.text} strokeWidth={2.5} />
+              <Feather name="arrow-left" size={24} color={ICON_COLORS.primary} strokeWidth={2.5} />
             </TouchableOpacity>
             
-            <View style={styles.projectHeader}>
-              <View style={styles.avatarContainer}>
-                <Feather name="folder" size={32} color={theme.colors.accent} strokeWidth={2.5} />
-              </View>
-              <View style={{ flex: 1, marginLeft: theme.spacing.md }}>
-                <Text style={styles.detailTitle}>{project.name}</Text>
-                {project.address ? (
-                  <View style={styles.infoRow}>
-                    <Feather name="map-pin" size={16} color={theme.colors.textSecondary} />
-                    <Text style={styles.detailLine}>{project.address}</Text>
+            {/* Carte header chantier premium */}
+            <View style={styles.projectCard}>
+              <View style={styles.projectCardContent}>
+                <Feather name="folder" size={28} color={ICON_COLORS.folder} strokeWidth={2.5} />
+                <View style={styles.projectCardText}>
+                  <View style={styles.projectCardHeader}>
+                    <Text style={styles.projectCardTitle}>{project.name}</Text>
+                    <TouchableOpacity
+                      style={styles.menuIconButton}
+                      onPress={() => setShowProjectMenu(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Feather name="more-vertical" size={20} color={ICON_COLORS.primary} strokeWidth={2.5} />
+                    </TouchableOpacity>
                   </View>
-                ) : null}
-                {client ? (
-                  <View style={styles.infoRow}>
-                    <Feather name="user" size={16} color={theme.colors.textSecondary} />
-                    <Text style={styles.detailLine}>{client.name}</Text>
-                  </View>
-                ) : null}
-                <View style={styles.statusRow}>
-                  <View style={[styles.statusBadge, { backgroundColor: `${statusConfig.color  }20` }]}>
-                    <Feather name={statusConfig.icon} size={14} color={statusConfig.color} />
-                    <Text style={[styles.statusText, { color: statusConfig.color }]}>
-                      {statusConfig.label}
-                    </Text>
-                  </View>
+                  {project.address ? (
+                    <Text style={styles.projectCardInfo}>{project.address}</Text>
+                  ) : null}
+                  {client ? (
+                    <Text style={styles.projectCardInfo}>{client.name}</Text>
+                  ) : null}
                 </View>
               </View>
-              <TouchableOpacity
-                style={styles.menuIconButton}
-                onPress={() => setShowProjectMenu(true)}
-                activeOpacity={0.7}
-              >
-                <Feather name="more-vertical" size={24} color={theme.colors.text} strokeWidth={2.5} />
-              </TouchableOpacity>
+              <View style={styles.projectCardFooter}>
+                <View style={[
+                  styles.statusBadge,
+                  (statusConfig.label === 'Actif' || statusConfig.label === 'En cours')
+                    ? styles.activeBadge
+                    : { backgroundColor: `${statusConfig.color}25` }
+                ]}>
+                  <Feather 
+                    name={statusConfig.icon} 
+                    size={14} 
+                    color={(statusConfig.label === 'Actif' || statusConfig.label === 'En cours')
+                      ? LOCAL_COLORS.activeBadgeText
+                      : statusConfig.color} 
+                  />
+                  <Text style={[
+                    styles.statusText,
+                    (statusConfig.label === 'Actif' || statusConfig.label === 'En cours')
+                      ? { color: LOCAL_COLORS.activeBadgeText }
+                      : { color: statusConfig.color }
+                  ]}>
+                    {statusConfig.label}
+                  </Text>
+                </View>
+              </View>
             </View>
           </View>
         }
@@ -535,7 +592,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
                   onPress={() => setShowTextNoteModal(true)}
                   activeOpacity={0.7}
                 >
-                  <Feather name="edit-3" size={18} color={theme.colors.text} strokeWidth={2.5} />
+                  <Feather name="edit-3" size={18} color={ICON_COLORS.primary} strokeWidth={2.5} />
                   <Text style={styles.addNoteButtonText}>Ajouter une note texte</Text>
                 </TouchableOpacity>
               </View>
@@ -553,7 +610,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
             {/* 🤖 Générateur Devis IA */}
             <View style={styles.aiGeneratorSection}>
               <Text style={styles.sectionTitle}>
-                <Feather name="zap" size={18} color="#8B5CF6" />
+                <Feather name="zap" size={18} color={COLORS.ai} />
                 {' '}Devis IA
               </Text>
               <DevisAIGenerator 
@@ -567,7 +624,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
             {/* 🤖 Générateur Facture IA */}
             <View style={styles.aiGeneratorSection}>
               <Text style={styles.sectionTitle}>
-                <Feather name="zap" size={18} color="#8B5CF6" />
+                <Feather name="zap" size={18} color={COLORS.ai} />
                 {' '}Facture IA
               </Text>
               <FactureAIGenerator 
@@ -627,9 +684,31 @@ export default function ProjectDetailScreen({ route, navigation }) {
               activeOpacity={0.7}
             >
               <View style={styles.menuButtonIcon}>
-                <Feather name="edit-3" size={20} color="#FFFFFF" strokeWidth={2.5} />
+                <Feather name="edit-3" size={20} color={ICON_COLORS.primary} strokeWidth={2.5} />
               </View>
               <Text style={styles.menuButtonText}>Changer le statut</Text>
+            </TouchableOpacity>
+
+            {/* Bouton Partager avec le client */}
+            <TouchableOpacity
+              style={[styles.menuButton, styles.menuShareButton]}
+              onPress={async () => {
+                setShowProjectMenu(false);
+                setTimeout(() => handleShare(), 300);
+              }}
+              activeOpacity={0.7}
+              disabled={shareLoading}
+            >
+              <View style={styles.menuButtonIcon}>
+                {shareLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Feather name="share-2" size={20} color="#FFFFFF" strokeWidth={2.5} />
+                )}
+              </View>
+              <Text style={styles.menuButtonText}>
+                {shareLoading ? 'Génération...' : 'Partager avec le client'}
+              </Text>
             </TouchableOpacity>
 
             {/* Bouton Archiver / Désarchiver selon le statut */}
@@ -638,12 +717,12 @@ export default function ProjectDetailScreen({ route, navigation }) {
                 style={[styles.menuButton, styles.menuUnarchiveButton]}
                 onPress={() => {
                   setShowProjectMenu(false);
-                  setTimeout(() => handleUnarchiveProject(), 300);
+                  setTimeout(() => setShowUnarchiveModal(true), 300);
                 }}
                 activeOpacity={0.7}
               >
                 <View style={styles.menuButtonIcon}>
-                  <Feather name="archive" size={20} color="#FFFFFF" strokeWidth={2.5} />
+                  <Feather name="archive" size={20} color={ICON_COLORS.archive} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.menuButtonText}>🔓 Désarchiver</Text>
               </TouchableOpacity>
@@ -652,12 +731,12 @@ export default function ProjectDetailScreen({ route, navigation }) {
                 style={[styles.menuButton, styles.menuArchiveButton]}
                 onPress={() => {
                   setShowProjectMenu(false);
-                  setTimeout(() => handleArchiveProject(), 300);
+                  setTimeout(() => setShowArchiveModal(true), 300);
                 }}
                 activeOpacity={0.7}
               >
                 <View style={styles.menuButtonIcon}>
-                  <Feather name="archive" size={20} color="#FFFFFF" strokeWidth={2.5} />
+                  <Feather name="archive" size={20} color={ICON_COLORS.archive} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.menuButtonText}>📦 Archiver</Text>
               </TouchableOpacity>
@@ -673,7 +752,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
               activeOpacity={0.7}
             >
               <View style={styles.menuButtonIcon}>
-                <Feather name="trash-2" size={20} color="#FFFFFF" strokeWidth={2.5} />
+                <Feather name="trash-2" size={20} color={ICON_COLORS.danger} strokeWidth={2.5} />
               </View>
               <Text style={styles.menuButtonText}>Supprimer</Text>
             </TouchableOpacity>
@@ -685,7 +764,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
               activeOpacity={0.7}
             >
               <View style={styles.menuButtonIcon}>
-                <Feather name="x" size={20} color="#FFFFFF" strokeWidth={2.5} />
+                <Feather name="x" size={20} color={ICON_COLORS.secondary} strokeWidth={2.5} />
               </View>
               <Text style={styles.menuButtonText}>Annuler</Text>
             </TouchableOpacity>
@@ -713,30 +792,26 @@ export default function ProjectDetailScreen({ route, navigation }) {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalContent, { maxHeight: '80%' }]}>
               <View style={styles.modalHeader}>
-                <Feather name="edit-3" size={24} color={theme.colors.accent} />
+                <Feather name="edit-3" size={24} color={ICON_COLORS.primary} />
                 <Text style={styles.modalTitle}>Note texte</Text>
               </View>
               
-              <TextInput
+              <AFInput
+                icon="file-text"
                 placeholder="Saisissez votre note..."
-                placeholderTextColor={theme.colors.textMuted}
                 value={textNote}
                 onChangeText={setTextNote}
                 multiline
                 numberOfLines={8}
                 editable={!savingNote}
-                style={{
-                  backgroundColor: theme.colors.surfaceElevated,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  borderRadius: 12,
-                  padding: 16,
-                  fontSize: 16,
-                  color: theme.colors.text, // Texte blanc visible
+                containerStyle={{
                   marginBottom: 16,
-                  textAlignVertical: 'top',
+                  minHeight: 150,
+                }}
+                style={{
                   minHeight: 150,
                   maxHeight: 300,
+                  textAlignVertical: 'top',
                 }}
                 autoFocus
               />
@@ -749,10 +824,10 @@ export default function ProjectDetailScreen({ route, navigation }) {
                   activeOpacity={0.7}
                 >
                   {savingNote ? (
-                    <ActivityIndicator color={theme.colors.text} />
+                    <ActivityIndicator color={ICON_COLORS.primary} />
                   ) : (
                     <>
-                      <Feather name="check-circle" size={20} color={theme.colors.text} />
+                      <Feather name="check-circle" size={20} color={ICON_COLORS.primary} />
                       <Text style={styles.generateButtonText}>Enregistrer</Text>
                     </>
                   )}
@@ -811,7 +886,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
                   <Text style={styles.statusOptionDescription}>Travaux en cours</Text>
                 </View>
                 {(project?.status === 'in_progress' || project?.status === 'active') && (
-                  <Feather name="check" size={20} color={theme.colors.accent} />
+                  <Feather name="check" size={20} color={ICON_COLORS.primary} />
                 )}
               </TouchableOpacity>
 
@@ -829,7 +904,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
                   <Text style={styles.statusOptionDescription}>En attente de démarrage</Text>
                 </View>
                 {project?.status === 'planned' && (
-                  <Feather name="check" size={20} color={theme.colors.accent} />
+                  <Feather name="check" size={20} color={ICON_COLORS.primary} />
                 )}
               </TouchableOpacity>
 
@@ -847,7 +922,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
                   <Text style={styles.statusOptionDescription}>Travaux terminés</Text>
                 </View>
                 {project?.status === 'done' && (
-                  <Feather name="check" size={20} color={theme.colors.accent} />
+                  <Feather name="check" size={20} color={ICON_COLORS.primary} />
                 )}
               </TouchableOpacity>
             </View>
@@ -864,86 +939,42 @@ export default function ProjectDetailScreen({ route, navigation }) {
       </Modal>
 
       {/* ✨ Modal de confirmation de suppression (2ème étape) */}
-      <Modal
+      <AFModal
         visible={showDeleteConfirmModal}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => {
+        title="Confirmer la suppression"
+        message={`Êtes-vous sûr de vouloir supprimer le chantier "${project?.name}" ?\n\nCette action est définitive. Toutes les photos, notes et documents associés seront effacés définitivement.`}
+        onCancel={() => {
           if (!deletingProject) {
             setShowDeleteConfirmModal(false);
           }
         }}
-      >
-        <Pressable 
-          style={styles.deleteModalOverlay}
-          onPress={() => {
-            if (!deletingProject) {
-              setShowDeleteConfirmModal(false);
-            }
-          }}
-        >
-          <Pressable style={styles.deleteModalContainer} onPress={(e) => e.stopPropagation()}>
-            {/* Icône d'avertissement rouge agrandie */}
-            <View style={styles.deleteModalIconContainer}>
-              <Feather name="alert-triangle" size={53} color="#EF4444" strokeWidth={2} />
-            </View>
+        onConfirm={confirmDeleteProject}
+        confirmLabel={deletingProject ? 'Suppression...' : 'Supprimer définitivement'}
+        cancelLabel="Annuler"
+        danger={true}
+      />
 
-            {/* Titre */}
-            <Text style={styles.deleteModalTitle}>
-              Confirmer la suppression
-            </Text>
+      {/* Modal confirmation archivage */}
+      <AFModal
+        visible={showArchiveModal}
+        title="Archiver le chantier"
+        message={`Voulez-vous archiver "${project?.name}" ?\n\nLe chantier sera masqué mais conservé dans l'historique.`}
+        onCancel={() => setShowArchiveModal(false)}
+        onConfirm={handleArchiveProject}
+        confirmLabel="Archiver"
+        cancelLabel="Annuler"
+      />
 
-            {/* Sous-texte en orange */}
-            <Text style={styles.deleteModalSubtitle}>
-              Cette action est définitive.
-            </Text>
-
-            {/* Message détaillé avec nom du chantier */}
-            <Text style={styles.deleteModalMessage}>
-              Êtes-vous sûr de vouloir supprimer le chantier{'\n'}
-              <Text style={styles.deleteModalProjectName}>"{project?.name}"</Text> ?{'\n\n'}
-              Toutes les photos, notes et documents associés seront effacés définitivement.
-            </Text>
-
-            {/* Boutons en ligne */}
-            <View style={styles.deleteModalButtons}>
-              <TouchableOpacity
-                style={[
-                  styles.deleteModalButton,
-                  styles.deleteModalCancelButton,
-                  deletingProject && { opacity: 0.6 }
-                ]}
-                onPress={() => setShowDeleteConfirmModal(false)}
-                disabled={deletingProject}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.deleteModalCancelText}>
-                  Annuler
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.deleteModalButton,
-                  styles.deleteModalConfirmButton,
-                  deletingProject && { opacity: 0.6 }
-                ]}
-                onPress={confirmDeleteProject}
-                disabled={deletingProject}
-                activeOpacity={0.7}
-              >
-                {deletingProject ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.deleteModalConfirmText}>
-                    Supprimer définitivement
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Modal confirmation désarchivage */}
+      <AFModal
+        visible={showUnarchiveModal}
+        title="Désarchiver le chantier"
+        message={`Voulez-vous restaurer "${project?.name}" ?\n\nLe chantier redeviendra visible dans vos listes.`}
+        onCancel={() => setShowUnarchiveModal(false)}
+        onConfirm={handleUnarchiveProject}
+        confirmLabel="Désarchiver"
+        cancelLabel="Annuler"
+      />
     </SafeAreaView>
   );
 }
@@ -951,7 +982,7 @@ export default function ProjectDetailScreen({ route, navigation }) {
 const getStyles = (theme) => StyleSheet.create({
   container: { 
     flex: 1, 
-    backgroundColor: theme.colors.background,
+    backgroundColor: LOCAL_COLORS.background,
   },
   loading: { 
     ...theme.typography.body,
@@ -975,93 +1006,101 @@ const getStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
-  projectHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  projectCard: {
+    backgroundColor: LOCAL_COLORS.cardBg,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: LOCAL_COLORS.cardBorder,
+    marginBottom: theme.spacing.md,
   },
-  avatarContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: `${theme.colors.accent  }20`,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  detailTitle: { 
-    ...theme.typography.h2,
-    fontSize: 24,
-    marginBottom: theme.spacing.sm,
-  },
-  infoRow: {
+  projectCardContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: theme.spacing.xs,
+    gap: 12,
+    marginBottom: 12,
   },
-  detailLine: { 
-    ...theme.typography.bodySmall,
-    marginLeft: theme.spacing.xs,
+  projectCardText: {
+    flex: 1,
   },
-  statusRow: {
-    marginTop: theme.spacing.sm,
+  projectCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  projectCardTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: LOCAL_COLORS.textPrimary,
+    flex: 1,
+  },
+  projectCardInfo: {
+    fontSize: 14,
+    color: LOCAL_COLORS.textSecondary,
+    marginTop: 2,
+  },
+  projectCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.sm,
-    borderRadius: theme.borderRadius.sm,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    gap: 4,
+  },
+  activeBadge: {
+    backgroundColor: LOCAL_COLORS.activeBadgeBg,
   },
   statusText: {
     fontSize: 12,
-    fontWeight: '700',
-    marginLeft: theme.spacing.xs,
+    fontWeight: '600',
+    marginLeft: 0,
   },
   menuIconButton: {
-    width: 40,
-    height: 40,
+    width: 32,
+    height: 32,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: theme.spacing.sm,
+    padding: 0,
   },
-  // ✨ Styles pour la modal menu refonte
+  // ✨ Styles pour la modal menu refonte (utilise modalStyles centralisés)
   menuOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)', // Semi-transparent noir
-    justifyContent: 'center', // Centrer verticalement
-    alignItems: 'center', // Centrer horizontalement
+    ...modalComponentStyles.overlay,
     padding: theme.spacing.lg,
   },
   menuContent: {
-    backgroundColor: '#1F2937', // Gris anthracite
-    borderRadius: 20, // Coins arrondis
-    width: '85%', // 85% de l'écran
+    backgroundColor: '#0F172A', // Utilise la couleur du thème modal
+    borderRadius: 20,
+    width: '85%',
     padding: 24,
+    borderWidth: 1,
+    borderColor: '#1E293B',
     ...theme.shadows.xl,
-    // Animation scale (géré par Animated dans le futur, pour l'instant juste le style)
   },
   menuHeader: {
     alignItems: 'center',
     marginBottom: theme.spacing.md,
   },
   menuTitle: {
-    ...theme.typography.h4,
+    ...modalComponentStyles.title,
     fontSize: 18,
-    fontWeight: '700',
-    color: theme.colors.text,
     textAlign: 'center',
     marginBottom: theme.spacing.xs,
   },
   menuSubtitle: {
-    ...theme.typography.body,
+    ...modalComponentStyles.message,
     fontSize: 14,
-    color: '#9CA3AF', // Gris
     textAlign: 'center',
   },
   menuWarning: {
-    ...theme.typography.bodySmall,
+    ...modalComponentStyles.message,
     fontSize: 13,
-    color: '#9CA3AF', // Gris
     textAlign: 'center',
     lineHeight: 18,
     marginBottom: theme.spacing.lg,
@@ -1088,6 +1127,9 @@ const getStyles = (theme) => StyleSheet.create({
   menuStatusButton: {
     backgroundColor: '#3B82F6', // Bleu
   },
+  menuShareButton: {
+    backgroundColor: '#10B981', // Vert
+  },
   menuArchiveButton: {
     backgroundColor: '#F59E0B', // Orange
   },
@@ -1101,11 +1143,9 @@ const getStyles = (theme) => StyleSheet.create({
     backgroundColor: '#374151', // Gris bleuté
     marginBottom: 16, // Respiration en bas de la modal
   },
-  // ✨ Styles modal changement statut
+  // ✨ Styles modal changement statut (utilise modalStyles centralisés)
   statusModalContent: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 20,
-    padding: 24,
+    ...modalComponentStyles.content,
     marginHorizontal: 20,
     maxWidth: 500,
     alignSelf: 'center',
@@ -1118,14 +1158,10 @@ const getStyles = (theme) => StyleSheet.create({
     marginBottom: 8,
   },
   statusModalTitle: {
-    ...theme.typography.h3,
-    fontSize: 20,
-    fontWeight: '700',
-    color: theme.colors.text,
+    ...modalComponentStyles.title,
   },
   statusModalSubtitle: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textSecondary,
+    ...modalComponentStyles.message,
     marginBottom: 20,
   },
   statusOptions: {
@@ -1164,17 +1200,15 @@ const getStyles = (theme) => StyleSheet.create({
     fontSize: 12,
   },
   statusCancelButton: {
-    backgroundColor: theme.colors.surface,
+    backgroundColor: '#0F172A',
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#1E293B',
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
   },
   statusCancelButtonText: {
-    ...theme.typography.body,
-    fontWeight: '600',
-    color: theme.colors.textSecondary,
+    ...modalComponentStyles.buttonTextCancel,
   },
   menuButtonText: {
     ...theme.typography.body,
@@ -1184,20 +1218,14 @@ const getStyles = (theme) => StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,              // Alignement vertical avec icône
   },
-  // ✨ Styles pour la modal de confirmation de suppression (2ème étape)
+  // ✨ Styles pour la modal de confirmation de suppression (utilise modalStyles centralisés)
   deleteModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)', // Noir semi-transparent cohérent
-    justifyContent: 'center',
-    alignItems: 'center',
+    ...modalComponentStyles.overlay,
     padding: 24,
   },
   deleteModalContainer: {
-    backgroundColor: '#1F2937', // Gris anthracite cohérent avec 1ère modal
-    borderRadius: 20, // Cohérent avec 1ère modal
-    padding: 24, // Padding généreux
-    width: '85%', // Même largeur que 1ère modal
-    ...theme.shadows.xl,
+    ...modalComponentStyles.content,
+    width: '85%',
     alignItems: 'center',
   },
   deleteModalIconContainer: {
@@ -1210,27 +1238,21 @@ const getStyles = (theme) => StyleSheet.create({
     marginBottom: theme.spacing.lg,
   },
   deleteModalTitle: {
-    ...theme.typography.h3,
-    fontSize: 20, // Cohérent avec titre 1ère modal
-    fontWeight: '700',
-    color: theme.colors.text,
+    ...modalComponentStyles.title,
     textAlign: 'center',
     marginBottom: theme.spacing.xs,
   },
   deleteModalSubtitle: {
-    ...theme.typography.body,
+    ...modalComponentStyles.message,
     fontSize: 14,
-    color: '#F59E0B', // Orange clair (warning)
+    color: COLORS.warning,
     textAlign: 'center',
     marginBottom: theme.spacing.lg,
     fontWeight: '600',
   },
   deleteModalMessage: {
-    ...theme.typography.body,
-    fontSize: 15,
-    color: theme.colors.textSecondary,
+    ...modalComponentStyles.message,
     textAlign: 'center',
-    lineHeight: 24,
     marginBottom: theme.spacing.xxl,
   },
   deleteModalProjectName: {
@@ -1258,16 +1280,12 @@ const getStyles = (theme) => StyleSheet.create({
     backgroundColor: '#EF4444', // Rouge
   },
   deleteModalCancelText: {
-    ...theme.typography.body,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF', // Blanc pur
+    ...modalComponentStyles.confirmButtonText,
+    color: '#FFFFFF',
   },
   deleteModalConfirmText: {
-    ...theme.typography.body,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF', // Blanc pur
+    ...modalComponentStyles.buttonTextDanger,
+    color: '#FFFFFF',
   },
   content: {
     paddingHorizontal: theme.spacing.lg,
@@ -1320,15 +1338,52 @@ const getStyles = (theme) => StyleSheet.create({
     color: theme.colors.text,
   },
   modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    ...modalComponentStyles.overlay,
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: theme.colors.surface,
-    borderTopLeftRadius: theme.borderRadius.xl,
-    borderTopRightRadius: theme.borderRadius.xl,
+    backgroundColor: '#0F172A',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1E293B',
     maxHeight: '90%',
-    padding: theme.spacing.lg,
+    padding: 24,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  modalTitle: {
+    ...modalComponentStyles.title,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 16,
+  },
+  generateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+  },
+  generateButtonText: {
+    ...modalComponentStyles.confirmButtonText,
+    color: '#FFFFFF',
+  },
+  cancelModalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+  },
+  cancelModalText: {
+    ...modalComponentStyles.buttonTextCancel,
   },
 });

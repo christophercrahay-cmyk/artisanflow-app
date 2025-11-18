@@ -23,6 +23,7 @@ import { Feather } from '@expo/vector-icons';
 // import * as Haptics from 'expo-haptics'; // Désactivé temporairement
 import { useThemeColors } from '../theme/theme2';
 import { ScreenContainer, PrimaryButton } from '../components/ui';
+import { COLORS } from '../theme/colors';
 import { supabase } from '../supabaseClient';
 import logger from '../utils/logger';
 import { showSuccess, showError } from '../components/Toast';
@@ -35,9 +36,12 @@ import ProjectPickerSheet from '../components/ProjectPickerSheet';
 import ClientProjectSelector from '../components/ClientProjectSelector';
 import { useFocusEffect } from '@react-navigation/native';
 import HomeHeader from '../components/HomeHeader';
+import { useNetworkStatus } from '../contexts/NetworkStatusContext';
+import { addToQueue } from '../services/offlineQueueService';
 
 export default function CaptureHubScreen2({ navigation }) {
   const theme = useThemeColors();
+  const { isOffline } = useNetworkStatus();
   const [activeProject, setActiveProject] = useState(null);
   const [showClientProjectSelector, setShowClientProjectSelector] = useState(false);
   const [currentCaptureType, setCurrentCaptureType] = useState(null);
@@ -238,7 +242,7 @@ export default function CaptureHubScreen2({ navigation }) {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: false,
         quality: 0.8,
         allowsMultipleSelection: false,
@@ -387,6 +391,26 @@ export default function CaptureHubScreen2({ navigation }) {
           transcription: noteTextToSave,
         };
 
+        // Si hors ligne, ajouter à la queue
+        if (isOffline) {
+          await addToQueue({
+            type: 'note',
+            data: {
+              projectId: activeProject.id,
+              clientId: activeProject.client_id,
+              content: noteTextToSave,
+              createdAt: new Date().toISOString(),
+            },
+          });
+          
+          setShowTextNoteModal(false);
+          setTextNote('');
+          showSuccess(`Note sauvegardée (synchronisation en attente)`);
+          loadStats();
+          return;
+        }
+
+        // En ligne, insertion directe
         const { error } = await supabase.from('notes').insert([noteData]).select();
         if (error) throw error;
 
@@ -448,45 +472,38 @@ export default function CaptureHubScreen2({ navigation }) {
       {/* Header avec salutation */}
       <HomeHeader />
 
-      {/* Sélecteur pill premium */}
+      {/* Carte Chantier actif */}
       <Pressable
         onPress={() => {
-          // // // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           setShowClientProjectSelector(true);
         }}
         style={({ pressed }) => [
-          styles.selectorPill,
+          styles.activeProjectCard,
           {
-            backgroundColor: pressed ? theme.colors.primarySoft : theme.colors.surfaceAlt,
-            borderRadius: theme.radius.round,
+            backgroundColor: theme.colors.surfaceAlt,
+            borderRadius: 16,
             borderColor: theme.colors.border,
+            transform: [{ scale: pressed ? 0.98 : 1 }],
           },
           theme.shadowSoft,
         ]}
       >
-        <Feather name="folder" size={20} color={theme.colors.primary} strokeWidth={2.5} />
+        <Feather name="folder" size={20} color={COLORS.iconFolder} strokeWidth={2.5} />
         <View style={styles.selectorText}>
           <Text style={[styles.selectorLabel, { color: theme.colors.textSoft }]}>
             Chantier actif
           </Text>
           {activeProject ? (
-            <>
-              <Text style={[styles.selectorValue, { color: theme.colors.text }]}>
-                {activeProject.name}
-              </Text>
-              {activeProject.clients?.name && (
-                <Text style={[styles.selectorClient, { color: theme.colors.textMuted }]}>
-                  {activeProject.clients.name}
-                </Text>
-              )}
-            </>
+            <Text style={[styles.selectorValue, { color: theme.colors.text }]} numberOfLines={1}>
+              {activeProject.name}
+            </Text>
           ) : (
             <Text style={[styles.selectorPlaceholder, { color: theme.colors.textMuted }]}>
               Sélectionner un chantier
             </Text>
           )}
         </View>
-        <Feather name="chevron-down" size={20} color={theme.colors.textMuted} />
+        <Feather name="chevron-right" size={20} color={theme.colors.textMuted} />
       </Pressable>
 
       {/* Section 1 : Actions de capture avec fond gris */}
@@ -504,7 +521,7 @@ export default function CaptureHubScreen2({ navigation }) {
                 theme.shadowSoft,
               ]}
             >
-              <Text style={styles.cardIcon}>📸</Text>
+              <Feather name="camera" size={28} color={COLORS.primary} strokeWidth={2.5} />
               <Text style={[styles.cardLabel, { color: theme.colors.text }]}>Photo</Text>
             </Animated.View>
           </Pressable>
@@ -521,7 +538,7 @@ export default function CaptureHubScreen2({ navigation }) {
                 theme.shadowSoft,
               ]}
             >
-              <Text style={styles.cardIcon}>🎤</Text>
+              <Feather name="mic" size={28} color={COLORS.primary} strokeWidth={2.5} />
               <Text style={[styles.cardLabel, { color: theme.colors.text }]}>Vocal</Text>
             </Animated.View>
           </Pressable>
@@ -538,7 +555,7 @@ export default function CaptureHubScreen2({ navigation }) {
                 theme.shadowSoft,
               ]}
             >
-              <Text style={styles.cardIcon}>✏️</Text>
+              <Feather name="edit-3" size={28} color={COLORS.primary} strokeWidth={2.5} />
               <Text style={[styles.cardLabel, { color: theme.colors.text }]}>Note</Text>
             </Animated.View>
           </Pressable>
@@ -550,11 +567,13 @@ export default function CaptureHubScreen2({ navigation }) {
         <View style={styles.statsContainer}>
           {/* Carte Chantiers actifs */}
           <View style={[styles.statCard, { backgroundColor: theme.colors.surface }, theme.shadowSoft]}>
-            <Feather name="folder" size={20} color={theme.colors.primary} strokeWidth={2} />
+            <Feather name="folder" size={20} color={COLORS.iconFolder} strokeWidth={2} />
             <Text style={[styles.statValue, { color: theme.colors.text }]}>
               {loadingStats ? '...' : stats.activeProjects}
             </Text>
-            <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Actifs</Text>
+            <Text style={[styles.statLabel, { color: theme.colors.textMuted }]} numberOfLines={1}>
+              Actifs
+            </Text>
           </View>
 
           {/* Carte Chantiers terminés */}
@@ -563,40 +582,54 @@ export default function CaptureHubScreen2({ navigation }) {
             <Text style={[styles.statValue, { color: theme.colors.text }]}>
               {loadingStats ? '...' : stats.completedProjects}
             </Text>
-            <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Terminés</Text>
+            <Text style={[styles.statLabel, { color: theme.colors.textMuted }]} numberOfLines={1}>
+              Terminés
+            </Text>
           </View>
 
           {/* Carte Photos */}
           <View style={[styles.statCard, { backgroundColor: theme.colors.surface }, theme.shadowSoft]}>
-            <Feather name="image" size={20} color={theme.colors.accent} strokeWidth={2} />
+            <Feather name="image" size={20} color="#8B5CF6" strokeWidth={2} />
             <Text style={[styles.statValue, { color: theme.colors.text }]}>
               {loadingStats ? '...' : stats.recentPhotos}
             </Text>
-            <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Photos</Text>
+            <Text style={[styles.statLabel, { color: theme.colors.textMuted }]} numberOfLines={1}>
+              Photos
+            </Text>
           </View>
 
           {/* Carte Documents */}
           <View style={[styles.statCard, { backgroundColor: theme.colors.surface }, theme.shadowSoft]}>
-            <Feather name="file-text" size={20} color={theme.colors.warning} strokeWidth={2} />
+            <Feather name="file-text" size={20} color="#FACC15" strokeWidth={2} />
             <Text style={[styles.statValue, { color: theme.colors.text }]}>
               {loadingStats ? '...' : stats.recentDocuments}
             </Text>
-            <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Documents</Text>
+            <Text style={[styles.statLabel, { color: theme.colors.textMuted }]} numberOfLines={1}>
+              Documents
+            </Text>
           </View>
         </View>
       </View>
 
       {/* Bouton Accès chantier en bas */}
       <View style={styles.bottomButtonContainer}>
-        <TouchableOpacity
+        <Pressable
           onPress={() => navigation.navigate('ProjectsList')}
-          style={[styles.accessButton, { backgroundColor: theme.colors.primary }, theme.shadowSoft]}
+          style={({ pressed }) => [
+            styles.accessButton,
+            {
+              backgroundColor: theme.colors.primary,
+              transform: [{ scale: pressed ? 0.98 : 1 }],
+            },
+            theme.shadowSoft,
+          ]}
         >
           <Feather name="folder" size={20} color={theme.colors.primaryText} strokeWidth={2.5} />
           <Text style={[styles.accessButtonText, { color: theme.colors.primaryText }]}>
             Accès chantier
           </Text>
-        </TouchableOpacity>
+          <Feather name="chevron-right" size={18} color={theme.colors.primaryText} strokeWidth={2.5} />
+        </Pressable>
       </View>
 
       {/* Overlay uploading */}
@@ -797,15 +830,15 @@ const getStyles = (theme) => StyleSheet.create({
     fontSize: theme.typography.body,
     lineHeight: 22,
   },
-  selectorPill: {
+  activeProjectCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing.sm,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     marginHorizontal: theme.spacing.lg,
     marginBottom: theme.spacing.xl,
-    borderWidth: 1,
+    borderWidth: 0.5,
   },
   selectorText: {
     flex: 1,
@@ -853,10 +886,7 @@ const getStyles = (theme) => StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: theme.spacing.md,
     paddingHorizontal: theme.spacing.sm,
-  },
-  cardIcon: {
-    fontSize: 36,
-    marginBottom: 8,
+    gap: 8,
   },
   cardLabel: {
     fontSize: 18,
@@ -976,10 +1006,10 @@ const getStyles = (theme) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.lg,
-    borderRadius: theme.radius.round,
-    gap: theme.spacing.sm,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    gap: 12,
   },
   accessButtonText: {
     fontSize: theme.typography.body,
