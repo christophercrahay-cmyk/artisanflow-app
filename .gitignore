@@ -51,17 +51,18 @@ web/
 *.orig.*
 eas.json
 
-# React Native - Exclure tous les dossiers React Native
-screens/
-navigation/
-services/
-store/
-hooks/
-utils/
-theme/
-contexts/
-config/
-validation/
+# React Native - Exclure tous les dossiers React Native à la racine (sauf lib/ pour Next.js)
+/screens/
+/navigation/
+/services/
+/store/
+/hooks/
+/theme/
+/contexts/
+/config/
+/validation/
+/utils/
+# Note: lib/utils/ est inclus pour Next.js (pas à la racine)
 
 # React Native - Exclure les composants React Native sauf ceux pour Next.js
 components/**/*.js
