@@ -1,0 +1,10 @@
+app.json
+app.config.js
+android/
+ios/
+assets/
+metro.config.js
+eas.json
+.expo/
+.expo-shared/
+
