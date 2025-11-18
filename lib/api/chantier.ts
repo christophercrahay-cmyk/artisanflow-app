@@ -3,6 +3,12 @@ import type { Project } from '@/types';
 
 export async function getProjectByToken(token: string): Promise<Project | null> {
   try {
+    // Vérifier que Supabase est configuré
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      console.error('Supabase not configured');
+      return null;
+    }
+
     const { data, error } = await supabase.rpc('get_public_chantier', {
       p_share_token: token,
     });
