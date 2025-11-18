@@ -24,6 +24,22 @@ const nextConfig = {
       ...config.resolve.alias,
       'react-native$': 'react-native-web',
     };
+    
+    // Exclure les modules React Native du build côté serveur
+    if (isServer) {
+      config.externals = config.externals || [];
+      config.externals.push({
+        'react-native': 'commonjs react-native',
+        'expo': 'commonjs expo',
+      });
+    }
+    
+    // Ignorer les warnings de modules non trouvés pour React Native
+    config.ignoreWarnings = [
+      { module: /node_modules\/react-native/ },
+      { module: /node_modules\/expo/ },
+    ];
+    
     return config;
   },
   pageExtensions: ['ts', 'tsx', 'js', 'jsx'],
