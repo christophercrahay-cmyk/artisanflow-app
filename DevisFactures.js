@@ -34,7 +34,7 @@ try {
   }
 }
 
-export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
+export default function DevisFactures({ projectId, clientId, type = 'devis', navigation }) {
   // type = 'devis' ou 'facture'
   const isDevis = type === 'devis';
   
@@ -393,6 +393,36 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
   };
 
   const deleteItem = async (id) => {
+    // Pour les devis, vérifier le statut avant de supprimer
+    if (isDevis) {
+      try {
+        // Récupérer le devis pour vérifier son statut
+        const { data: devis, error: devisError } = await supabase
+          .from('devis')
+          .select('id, statut')
+          .eq('id', id)
+          .single();
+
+        if (devisError || !devis) {
+          Alert.alert('Erreur', 'Devis introuvable');
+          return;
+        }
+
+        // Importer la fonction de vérification
+        const { canDeleteDevis, getDevisLockMessage } = require('./utils/devisRules');
+        
+        // Vérifier si le devis peut être supprimé
+        if (!canDeleteDevis(devis.statut)) {
+          Alert.alert('🔒 Devis verrouillé', getDevisLockMessage(devis.statut));
+          return;
+        }
+      } catch (error) {
+        console.error('Erreur vérification statut devis:', error);
+        Alert.alert('Erreur', 'Impossible de vérifier le statut du devis');
+        return;
+      }
+    }
+
     Alert.alert('Confirmer', `Supprimer ce ${type} ?`, [
       { text: 'Annuler', style: 'cancel' },
       {
@@ -400,15 +430,28 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
         style: 'destructive',
         onPress: async () => {
           try {
-            const tableName = isDevis ? 'devis' : 'factures';
-            const { error } = await supabase.from(tableName).delete().eq('id', id);
-            if (error) {
-              console.error(`Erreur suppression ${type}:`, error);
-              Alert.alert('Erreur', `Impossible de supprimer le ${type}`);
-              return;
+            // Pour les devis, utiliser la fonction protégée si disponible
+            if (isDevis) {
+              const { deleteDevis } = require('./services/devis/devisService');
+              const result = await deleteDevis(id);
+              
+              if (result.success) {
+                await loadItems();
+                Alert.alert('OK', 'Devis supprimé ✅');
+              } else {
+                Alert.alert('Erreur', result.error || 'Impossible de supprimer le devis');
+              }
+            } else {
+              // Pour les factures, suppression directe (pas de protection pour l'instant)
+              const { error } = await supabase.from('factures').delete().eq('id', id);
+              if (error) {
+                console.error(`Erreur suppression ${type}:`, error);
+                Alert.alert('Erreur', `Impossible de supprimer le ${type}`);
+                return;
+              }
+              await loadItems();
+              Alert.alert('OK', 'Facture supprimée ✅');
             }
-            await loadItems();
-            Alert.alert('OK', `${isDevis ? 'Devis' : 'Facture'} supprimé(e) ✅`);
           } catch (err) {
             console.error(`Exception suppression ${type}:`, err);
             Alert.alert('Erreur', 'Erreur lors de la suppression');
@@ -419,55 +462,30 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
   };
 
   const editItem = (item) => {
-    setEditingId(item.id);
-    setNumero(item.numero);
-    setMontant(item.montant_ht.toString());
-    setTva(item.tva_percent.toString());
-    setNotes(item.notes || '');
-    setTranscription(item.transcription || '');
-    setStatut(item.statut);
-    setDateValidite(isDevis ? item.date_validite || '' : item.date_echeance || '');
-    // Charger les infos entreprise du document (si elles existent)
-    setCompanyName(item.company_name || companySettings?.company_name || '');
-    setCompanySiret(item.company_siret || companySettings?.company_siret || '');
-    setCompanyAddress(item.company_address || companySettings?.company_address || '');
-    setCompanyCity(item.company_city || companySettings?.company_city || '');
-    setCompanyPhone(item.company_phone || companySettings?.company_phone || '');
-    setCompanyEmail(item.company_email || companySettings?.company_email || '');
-    setShowForm(true);
-  };
-
-  const handleViewPDF = async (item) => {
-    try {
-      // Vérifier s'il y a des lignes pour ce devis
-      const { data: lignes, error: lignesError } = await supabase
-        .from('devis_lignes')
-        .select('id')
-        .eq('devis_id', item.id);
-
-      if (lignesError || !lignes || lignes.length === 0) {
-        Alert.alert('Aucune ligne', 'Ce devis ne contient pas de lignes détaillées.\n\nUtilisez le bouton "Générer devis IA" pour créer un devis structuré.');
-        return;
-      }
-
-      // Générer le PDF depuis la BDD
-      const { generateDevisPDFFromDB } = require('./utils/utils/pdf');
-      const result = await generateDevisPDFFromDB(item.id);
-
-      if (result.localUri) {
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
-          await Sharing.shareAsync(result.localUri, {
-            mimeType: 'application/pdf',
-            dialogTitle: `Devis ${item.numero}`,
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Erreur génération PDF:', error);
-      Alert.alert('Erreur', error.message || 'Impossible de générer le PDF');
+    // Navigation directe vers EditDevisScreen (comme dans DocumentsScreen2)
+    if (isDevis && navigation) {
+      navigation.navigate('EditDevis', { devisId: item.id });
+    } else {
+      // Pour les factures ou si pas de navigation, comportement par défaut (formulaire inline)
+      setEditingId(item.id);
+      setNumero(item.numero);
+      setMontant(item.montant_ht.toString());
+      setTva(item.tva_percent.toString());
+      setNotes(item.notes || '');
+      setTranscription(item.transcription || '');
+      setStatut(item.statut);
+      setDateValidite(isDevis ? item.date_validite || '' : item.date_echeance || '');
+      // Charger les infos entreprise du document (si elles existent)
+      setCompanyName(item.company_name || companySettings?.company_name || '');
+      setCompanySiret(item.company_siret || companySettings?.company_siret || '');
+      setCompanyAddress(item.company_address || companySettings?.company_address || '');
+      setCompanyCity(item.company_city || companySettings?.company_city || '');
+      setCompanyPhone(item.company_phone || companySettings?.company_phone || '');
+      setCompanyEmail(item.company_email || companySettings?.company_email || '');
+      setShowForm(true);
     }
   };
+
 
   const renderItem = ({ item }) => (
     <View style={styles.itemCard}>
@@ -481,21 +499,12 @@ export default function DevisFactures({ projectId, clientId, type = 'devis' }) {
         <Text style={styles.itemStatut}>
           Statut: {item.statut.charAt(0).toUpperCase() + item.statut.slice(1)}
         </Text>
-        {item.transcription && (
+        {item.transcription && !item.transcription.includes('Session:') && !item.transcription.includes('Généré par IA - Session') && (
           <Text style={styles.itemTranscription} numberOfLines={2}>
             💬 {item.transcription}
           </Text>
         )}
       </TouchableOpacity>
-      
-      {isDevis && (
-        <TouchableOpacity
-          style={styles.pdfButton}
-          onPress={() => handleViewPDF(item)}
-        >
-          <Text style={styles.pdfButtonText}>👁️ PDF</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 

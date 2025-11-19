@@ -34,9 +34,16 @@ import { showSuccess, showError } from './components/Toast';
 import { requireProOrPaywall } from './utils/proAccess';
 import { useNavigation } from '@react-navigation/native';
 import { TranscriptionFeedback } from './components/TranscriptionFeedback';
+import * as FileSystem from 'expo-file-system/legacy';
+import { addToQueue } from './services/offlineQueueService';
+import { useNetworkStatus } from './contexts/NetworkStatusContext';
+
+// Feature flag pour activer/désactiver notes vocales offline
+const ENABLE_OFFLINE_VOICE = true; // Mettre false pour désactiver
 
 export default function VoiceRecorder({ projectId }) {
   const navigation = useNavigation();
+  const { isOffline } = useNetworkStatus();
 
   const isFocused = useIsFocused();
   const [recording, setRecording] = useState(null);
@@ -168,6 +175,12 @@ export default function VoiceRecorder({ projectId }) {
       const uri = recording.getURI();
       logger.info('VoiceRecorder', `URI obtenue: ${uri}`);
 
+      // GARDE-FOU 1 : Vérifier URI valide
+      if (!uri) {
+        showError('Erreur : enregistrement invalide');
+        return;
+      }
+
       const status = await recording.getStatusAsync();
       const duration = status?.durationMillis || 0;
       const durationSeconds = Math.round(duration / 1000);
@@ -190,11 +203,53 @@ export default function VoiceRecorder({ projectId }) {
 
       logger.info('VoiceRecorder', `Durée enregistrement: ${durationSeconds}s (${duration}ms)`);
 
-      setRecording(null);
-      setRecordUri(uri);
-      setSendButtonState('ready'); // ✅ Note prête à envoyer : bouton bleu
+      // Vérifier mode offline
+      if (isOffline && ENABLE_OFFLINE_VOICE) {
+        try {
+          // Récupérer les sélections dans le store
+          const { currentClient, currentProject } = useAppStore.getState();
+          
+          // Copier fichier dans dossier permanent
+          const voicesDir = `${FileSystem.documentDirectory}offline_voices/`;
+          await FileSystem.makeDirectoryAsync(voicesDir, { intermediates: true });
+          const permanentPath = `${voicesDir}voice_${Date.now()}_${Math.random().toString(36).substring(7)}.m4a`;
+          
+          // GARDE-FOU 2 : Vérifier copie réussie
+          await FileSystem.copyAsync({ from: uri, to: permanentPath });
+          const fileInfo = await FileSystem.getInfoAsync(permanentPath);
+          if (!fileInfo.exists) {
+            throw new Error('Copie fichier échouée');
+          }
+          
+          // Ajouter à la queue
+          await addToQueue({
+            type: 'voice',
+            data: {
+              filePath: permanentPath,
+              projectId: currentProject?.id || projectId,
+              clientId: currentClient?.id,
+              createdAt: new Date().toISOString(),
+            }
+          });
+          
+          setRecording(null);
+          showSuccess('Note vocale enregistrée, sera synchronisée au retour de connexion');
+          logger.success('VoiceRecorder', 'Note vocale ajoutée à la queue offline');
+          
+        } catch (offlineError) {
+          logger.error('VoiceRecorder', 'Erreur mode offline', offlineError);
+          showError('Impossible d\'enregistrer hors ligne. Reconnectez-vous.');
+          setRecording(null);
+        }
+        
+      } else {
+        // Mode online OU feature désactivée : comportement actuel
+        setRecording(null);
+        setRecordUri(uri);
+        setSendButtonState('ready'); // ✅ Note prête à envoyer : bouton bleu
 
-      logger.success('VoiceRecorder', `Enregistrement arrêté - Durée: ${durationSeconds}s`);
+        logger.success('VoiceRecorder', `Enregistrement arrêté - Durée: ${durationSeconds}s`);
+      }
     } catch (e) {
       logger.error('VoiceRecorder', 'Erreur arrêt enregistrement', e);
       Alert.alert('Erreur', e?.message || 'Stop impossible.');
@@ -255,7 +310,12 @@ export default function VoiceRecorder({ projectId }) {
         setTranscriptionStatus('Transcription en cours avec Whisper IA...');
         
         // ✅ Utiliser le storagePath déjà uploadé (plus besoin d'uploader à nouveau)
-        const rawText = await transcribeAudio(null, storagePath);
+        const transcriptionResult = await transcribeAudio({ 
+          audioUri: '', // Non utilisé car storagePath fourni
+          storagePath: storagePath,
+          language: 'fr'
+        });
+        const rawText = transcriptionResult.transcription;
         logger.info('VoiceRecorder', `Transcription brute: ${rawText}`);
         
         // ÉTAPE 3 : Correction orthographique avec GPT
@@ -363,6 +423,12 @@ export default function VoiceRecorder({ projectId }) {
       // Toast de succès
       showSuccess('Note envoyée avec succès');
 
+      // TODO : Génération auto désactivée
+      // L'artisan doit pouvoir accumuler plusieurs notes vocales
+      // puis cliquer sur "Générer devis IA" quand il est prêt
+      // pour générer UN devis complet à partir de TOUTES les notes
+      
+      /*
       // ÉTAPE 4 : Générer un devis automatiquement si prestation détectée
       let alertTitle = '✅ Note vocale envoyée.';
       let alertMessage = transcribedText ? `Transcription:\n${transcribedText}` : '';
@@ -407,6 +473,10 @@ export default function VoiceRecorder({ projectId }) {
       }
 
       Alert.alert(alertTitle, alertMessage);
+      */
+
+      // Alerte simple de confirmation
+      Alert.alert('✅ Note vocale envoyée', transcribedText || 'Note vocale sauvegardée avec succès');
 
     } catch (e) {
       logger.error('VoiceRecorder', 'Erreur uploadAndSave', e);
