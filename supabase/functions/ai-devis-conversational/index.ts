@@ -122,9 +122,42 @@ async function handleStart(supabase: any, data: any) {
   let fullTranscription = transcription || '';
   if (notes && notes.length > 0) {
     console.log(`📝 Compilation de ${notes.length} notes`);
-    fullTranscription = notes.map((note: any, index: number) => {
+    // Filtrer les notes null, undefined, ou sans transcription valide
+    const validNotes = notes.filter((note: any) => {
+      return note != null && 
+             typeof note === 'object' && 
+             note.transcription != null && 
+             typeof note.transcription === 'string' && 
+             note.transcription.trim().length > 0;
+    });
+    if (validNotes.length === 0) {
+      // Aucune note valide : retourner un devis vide avec des questions
+      console.log('⚠️ Aucune note valide trouvée, génération questionnaire');
+      return {
+        status: 'questions',
+        devis: {
+          lignes: [],
+          total_ht: 0,
+          total_ttc: 0,
+          tva_pourcent: 20,
+          tva_montant: 0,
+          titre: 'Nouveau devis',
+          description: 'Complétez le questionnaire pour générer votre devis',
+        },
+        questions: [
+          'Quel type de prestation souhaitez-vous facturer ?',
+          'Pouvez-vous décrire les travaux à réaliser ?',
+          'Quelle est la surface ou la quantité concernée ?',
+          'Y a-t-il des fournitures à inclure ?',
+          'Quel niveau de finition est souhaité ?',
+        ],
+        session_id: '',
+        tour_count: 0,
+      };
+    }
+    fullTranscription = validNotes.map((note: any, index: number) => {
       const date = new Date(note.created_at).toLocaleDateString('fr-FR');
-      return `[Note ${index + 1} - ${date}]\n${note.transcription}`;
+      return `[Note ${index + 1} - ${date}]\n${note.transcription || ''}`;
     }).join('\n\n');
   }
 

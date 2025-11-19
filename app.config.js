@@ -37,10 +37,11 @@ module.exports = {
         },
       ],
       'expo-asset',
+      'expo-mail-composer',
     ],
     
     splash: {
-      image: './assets/logo/artisanflow-home-logo.png',
+      image: './assets/artisanflow-home-logo.png',
       resizeMode: 'contain',
       backgroundColor: '#0D0F18',
     },
@@ -53,7 +54,7 @@ module.exports = {
       bundleIdentifier: IS_DEV ? 'com.artisanflow.dev' : 'com.acontrecourant.artisanflow',
       buildNumber: '2',
       splash: {
-        image: './assets/logo/artisanflow-home-logo.png',
+        image: './assets/artisanflow-home-logo.png',
         resizeMode: 'contain',
         backgroundColor: '#0D0F18',
       },
@@ -73,7 +74,7 @@ module.exports = {
         backgroundColor: '#0F1115',
       },
       splash: {
-        image: './assets/logo/artisanflow-home-logo.png',
+        image: './assets/artisanflow-home-logo.png',
         resizeMode: 'contain',
         backgroundColor: '#0D0F18',
       },

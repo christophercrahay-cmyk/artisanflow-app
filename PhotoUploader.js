@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { View, Text, TouchableOpacity, FlatList, Image, ActivityIndicator, StyleSheet, Alert, Dimensions, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import ImageViewing from 'react-native-image-viewing';
 import { supabase } from './supabaseClient';
@@ -16,7 +16,8 @@ import LocationPermissionModal from './components/LocationPermissionModal';
 import CameraPreviewModal from './components/CameraPreviewModal';
 import { useNetworkStatus } from './contexts/NetworkStatusContext';
 import { addToQueue } from './services/offlineQueueService';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import cameraService from './services/cameraService';
 
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
@@ -31,6 +32,7 @@ export default function PhotoUploader({ projectId }) {
   const theme = useSafeTheme();
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
+  const navigation = useNavigation();
   const { isOffline } = useNetworkStatus();
   const [photos, setPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -51,6 +53,41 @@ export default function PhotoUploader({ projectId }) {
   const [isCameraPreviewVisible, setIsCameraPreviewVisible] = useState(false);
   const [capturedPhotoUri, setCapturedPhotoUri] = useState(null);
 
+  // Fonction utilitaire pour formater la date (hors renderItem pour performance)
+  const formatPhotoDate = useCallback((dateString) => {
+    if (!dateString) return null;
+    try {
+      const date = new Date(dateString);
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      return `${day}/${month}/${year} à ${hours}:${minutes}`;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
+  // Fonction pour vérifier la géolocalisation (hors renderItem pour performance)
+  const checkHasLocation = useCallback((item) => {
+    if (item.latitude == null || item.longitude == null) {
+      return false;
+    }
+    const lat = typeof item.latitude === 'string' ? parseFloat(item.latitude) : item.latitude;
+    const lng = typeof item.longitude === 'string' ? parseFloat(item.longitude) : item.longitude;
+    if (isNaN(lat) || isNaN(lng)) {
+      return false;
+    }
+    if (lat === 0 && lng === 0) {
+      return false;
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return false;
+    }
+    return true;
+  }, []);
+
   // ═══════════════════════════════════════════════════════════
   // FONCTION : CHARGER LES PHOTOS (VERROUILLÉE)
   // ═══════════════════════════════════════════════════════════
@@ -63,9 +100,10 @@ export default function PhotoUploader({ projectId }) {
         return;
       }
 
+      // Optimisation: sélectionner uniquement les colonnes nécessaires à l'affichage
       const { data, error } = await supabase
         .from('project_photos')
-        .select('*')
+        .select('id, url, project_id, client_id, user_id, taken_at, created_at, latitude, longitude, city')
         .eq('project_id', projectId)
         .eq('user_id', user.id) // ✅ Filtre obligatoire pour isolation utilisateurs
         .order('created_at', { ascending: false });
@@ -95,6 +133,17 @@ export default function PhotoUploader({ projectId }) {
     }
   }, [isFocused, projectId]);
 
+  // Écouter les événements de capture photo depuis ProjectCameraScreen
+  useEffect(() => {
+    const unsubscribe = cameraService.onPhotoCaptured(async (photoUri) => {
+      logger.info('PhotoUploader', 'Photo capturée reçue depuis caméra', { photoUri });
+      await processAndUploadPhoto(photoUri);
+    });
+
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // processAndUploadPhoto est stable, pas besoin de dépendance
+
   const pickAndUpload = async () => {
     const { currentClient, currentProject } = useAppStore.getState();
     if (!currentProject?.id || !currentClient?.id) {
@@ -102,8 +151,10 @@ export default function PhotoUploader({ projectId }) {
       return;
     }
 
-    // ✅ Ouvrir la modal personnalisée pour choisir la source
-    setIsSourceModalVisible(true);
+    // ✅ Ouvrir directement la caméra intégrée (flux ultra-rapide)
+    navigation.navigate('ProjectCamera', {
+      projectId: currentProject.id,
+    });
   };
 
   const pickFromCamera = async () => {
@@ -118,7 +169,7 @@ export default function PhotoUploader({ projectId }) {
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: false, // On gère le preview nous-mêmes
         quality: 0.8,
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
       });
 
       if (result.canceled) {return;}
@@ -161,7 +212,7 @@ export default function PhotoUploader({ projectId }) {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         quality: 0.8,
         allowsMultipleSelection: false,
@@ -646,28 +697,80 @@ export default function PhotoUploader({ projectId }) {
     setIsViewerVisible(true);
   };
 
+  // RenderItem mémorisé pour FlatList (évite rerenders inutiles) - défini après openViewer et deletePhoto
+  const renderPhotoItem = useCallback(({ item, index }) => {
+    const photoDate = formatPhotoDate(item.taken_at || item.created_at);
+    const hasLocation = checkHasLocation(item);
+    const isPendingSync = item.synced === false || item.isLocal === true;
+
+    return (
+      <View style={styles.photoContainer}>
+        <TouchableOpacity
+          style={styles.photo}
+          onPress={() => openViewer(index)}
+          onLongPress={() => deletePhoto(item.id, item.url)}
+          activeOpacity={0.7}
+        >
+          <Image source={{ uri: item.url || item.uri }} style={styles.photoImg} />
+          {isPendingSync && (
+            <View style={styles.pendingBadge}>
+              <Text style={styles.pendingBadgeText}>🔄 En attente</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+        {photoDate && (
+          <View style={styles.photoInfo}>
+            <Text style={styles.photoDateText}>{photoDate}</Text>
+            {hasLocation && item.city && item.city.trim().length > 0 && (
+              <View style={styles.locationBadge}>
+                <Feather name="map-pin" size={10} color={theme.colors.accent} />
+                <Text style={styles.locationText} numberOfLines={1} ellipsizeMode="tail">
+                  {item.city}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }, [formatPhotoDate, checkHasLocation, styles, theme.colors.accent, openViewer, deletePhoto]);
+
   const styles = getStyles(theme);
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.btn}
-        onPress={pickAndUpload}
-        disabled={uploading}
-        activeOpacity={0.7}
-      >
-        {uploading ? (
-          <View style={styles.uploadingContainer}>
-            <ActivityIndicator color={theme.colors.text} size="small" />
-            <Text style={styles.uploadingText}>Upload {Math.round(uploadProgress)}%</Text>
-          </View>
-        ) : (
-          <>
-            <Feather name="camera" size={20} color={theme.colors.text} strokeWidth={2.5} />
-            <Text style={styles.btnText}>Prendre une photo</Text>
-          </>
+      <View>
+        <TouchableOpacity
+          style={styles.btn}
+          onPress={pickAndUpload}
+          disabled={uploading}
+          activeOpacity={0.7}
+        >
+          {uploading ? (
+            <View style={styles.uploadingContainer}>
+              <ActivityIndicator color={theme.colors.text} size="small" />
+              <Text style={styles.uploadingText}>Upload {Math.round(uploadProgress)}%</Text>
+            </View>
+          ) : (
+            <>
+              <Feather name="camera" size={20} color={theme.colors.text} strokeWidth={2.5} />
+              <Text style={styles.btnText}>Prendre une photo</Text>
+            </>
+          )}
+        </TouchableOpacity>
+        
+        {/* Lien discret pour importer depuis la galerie (option secondaire) */}
+        {!uploading && (
+          <TouchableOpacity
+            onPress={pickFromGallery}
+            style={styles.galleryLink}
+            activeOpacity={0.7}
+          >
+            <Feather name="image" size={14} color={theme.colors.textSecondary} strokeWidth={2} />
+            <Text style={styles.galleryLinkText}>Importer depuis la galerie</Text>
+          </TouchableOpacity>
         )}
-      </TouchableOpacity>
+      </View>
       
       {uploading && uploadProgress > 0 && (
         <View style={styles.progressBarContainer}>
@@ -679,103 +782,19 @@ export default function PhotoUploader({ projectId }) {
         data={photos}
         numColumns={3}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item, index }) => {
-          // Formater la date de prise de vue
-          const formatPhotoDate = (dateString) => {
-            if (!dateString) {return null;}
-            try {
-              const date = new Date(dateString);
-              const day = date.getDate().toString().padStart(2, '0');
-              const month = (date.getMonth() + 1).toString().padStart(2, '0');
-              const year = date.getFullYear();
-              const hours = date.getHours().toString().padStart(2, '0');
-              const minutes = date.getMinutes().toString().padStart(2, '0');
-              return `${day}/${month}/${year} à ${hours}:${minutes}`;
-            } catch (e) {
-              return null;
-            }
-          };
-
-          const photoDate = formatPhotoDate(item.taken_at || item.created_at);
-          
-          // Vérifier que la géolocalisation est valide (fonction robuste)
-          const hasLocation = (() => {
-            // Vérifier que les deux coordonnées existent
-            if (item.latitude == null || item.longitude == null) {
-              return false;
-            }
-            
-            // Convertir en nombre si ce sont des strings
-            const lat = typeof item.latitude === 'string' ? parseFloat(item.latitude) : item.latitude;
-            const lng = typeof item.longitude === 'string' ? parseFloat(item.longitude) : item.longitude;
-            
-            // Vérifier que ce sont des nombres valides
-            if (isNaN(lat) || isNaN(lng)) {
-              return false;
-            }
-            
-            // Vérifier que ce n'est pas 0,0 (coordonnées invalides)
-            if (lat === 0 && lng === 0) {
-              return false;
-            }
-            
-            // Vérifier les limites géographiques
-            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-              return false;
-            }
-            
-            return true;
-          })();
-          
-          // Debug: logger les coordonnées pour diagnostiquer
-          if (item.latitude != null || item.longitude != null) {
-            logger.debug('PhotoUploader', `Photo ${item.id}: lat=${item.latitude}, lng=${item.longitude}, hasLocation=${hasLocation}`);
-          }
-
-          // Vérifier si la photo est en attente de synchronisation
-          const isPendingSync = item.synced === false || item.isLocal === true;
-
-          return (
-            <View style={styles.photoContainer}>
-              <TouchableOpacity
-                style={styles.photo}
-                onPress={() => openViewer(index)}
-                onLongPress={() => deletePhoto(item.id, item.url)}
-                activeOpacity={0.7}
-              >
-                <Image source={{ uri: item.url || item.uri }} style={styles.photoImg} />
-                {/* Badge "en attente" pour photos non synchronisées */}
-                {isPendingSync && (
-                  <View style={styles.pendingBadge}>
-                    <Text style={styles.pendingBadgeText}>🔄 En attente</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-              {photoDate && (
-                <View style={styles.photoInfo}>
-                  <Text style={styles.photoDateText}>{photoDate}</Text>
-                  {/* Badge géolocalisation : affiché UNIQUEMENT si coordonnées GPS valides */}
-                  {hasLocation && (
-                    <View style={styles.locationBadge}>
-                      <Feather name="map-pin" size={10} color={theme.colors.accent} />
-                      <Text style={styles.locationText}>
-                        {item.city || 'Géolocalisé'}
-                      </Text>
-                    </View>
-                  )}
-                  {/* Si pas de GPS : rien n'est affiché (pas de badge "Non géolocalisé") */}
-                </View>
-              )}
-            </View>
-          );
-        }}
+        renderItem={renderPhotoItem}
         ListEmptyComponent={<Text style={styles.empty}>Aucune photo</Text>}
         columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={5}
+        removeClippedSubviews={true}
       />
 
-      {/* Modal de sélection de source photo */}
+      {/* Modal de sélection de source photo - DÉSACTIVÉ du flux principal */}
+      {/* Conservé pour compatibilité mais non utilisé dans le flux principal */}
       <PhotoSourceModal
-        visible={isSourceModalVisible}
+        visible={false}
         onClose={() => setIsSourceModalVisible(false)}
         onCamera={pickFromCamera}
         onGallery={pickFromGallery}
@@ -916,6 +935,20 @@ const getStyles = (theme) => StyleSheet.create({
     ...theme.typography.body,
     fontWeight: '700',
     color: theme.colors.text,
+  },
+  galleryLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: theme.spacing.xs,
+    paddingVertical: theme.spacing.xs,
+  },
+  galleryLinkText: {
+    ...theme.typography.bodySmall,
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    textDecorationLine: 'underline',
   },
   uploadingContainer: {
     flexDirection: 'row',

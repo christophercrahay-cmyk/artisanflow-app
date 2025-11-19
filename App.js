@@ -25,12 +25,6 @@ import SyncManager from './components/SyncManager';
 // Initialiser Sentry dès le démarrage
 initSentry();
 
-// 🔍 DIAGNOSTIC SUPABASE (à retirer après tests)
-console.log('🔍 === DIAGNOSTIC SUPABASE ===');
-console.log('Supabase URL:', supabase.supabaseUrl);
-console.log('Supabase Key (10 premiers chars):', `${supabase.supabaseKey?.substring(0, 10)  }...`);
-console.log('=================================');
-
 // Thème personnalisé pour NavigationContainer
 const CustomDarkTheme = {
   ...DarkTheme,
