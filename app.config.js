@@ -110,7 +110,7 @@ module.exports = {
       },
       // Base URL pour les liens de partage de chantier
       // Peut être surchargée par EXPO_PUBLIC_SHARE_BASE_URL
-      shareBaseUrl: process.env.EXPO_PUBLIC_SHARE_BASE_URL || 'https://magnificent-bonbon-b7534e.netlify.app',
+      shareBaseUrl: process.env.EXPO_PUBLIC_SHARE_BASE_URL || 'https://artisanflow.fr',
     },
     
     owner: 'chriskreepz',

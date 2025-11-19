@@ -27,14 +27,14 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'fr_FR',
-    url: 'https://artisanflow.app',
+    url: 'https://artisanflow.fr',
     title: "ArtisanFlow - Devis en 20 secondes avec l'IA",
     description:
       "L'application mobile pour artisans : devis IA, suivi client, mode offline",
     siteName: 'ArtisanFlow',
     images: [
       {
-        url: 'https://artisanflow.app/opengraph-image.svg',
+        url: 'https://artisanflow.fr/opengraph-image.svg',
         width: 1200,
         height: 630,
         alt: 'ArtisanFlow',
@@ -46,7 +46,7 @@ export const metadata: Metadata = {
     title: "ArtisanFlow - Devis en 20 secondes avec l'IA",
     description:
       "L'application mobile pour artisans : devis IA, suivi client, mode offline",
-    images: ['https://artisanflow.app/opengraph-image.svg'],
+    images: ['https://artisanflow.fr/opengraph-image.svg'],
   },
   robots: {
     index: true,

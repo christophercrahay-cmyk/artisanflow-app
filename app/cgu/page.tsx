@@ -151,7 +151,7 @@ export default function CGUPage() {
                   href="/confidentialite"
                   className="text-blue-600 hover:text-blue-700 underline"
                 >
-                  https://artisanflow.app/confidentialite
+                  https://artisanflow.fr/confidentialite
                 </a>
                 .
               </p>

@@ -7,7 +7,7 @@ export default function robots(): MetadataRoute.Robots {
       allow: '/',
       disallow: ['/api/', '/share/'],
     },
-    sitemap: 'https://artisanflow.app/sitemap.xml',
+    sitemap: 'https://artisanflow.fr/sitemap.xml',
   };
 }
 

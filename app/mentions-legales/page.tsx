@@ -22,7 +22,7 @@ export default function MentionsLegalesPage() {
                 1. Éditeur du site
               </h2>
               <p className="text-slate-700 leading-relaxed">
-                Le site artisanflow.app est édité par :
+                Le site artisanflow.fr est édité par :
               </p>
               <ul className="list-disc list-inside text-slate-700 space-y-2">
                 <li>Raison sociale : SASU À Contre Courant</li>
