@@ -1,0 +1,38 @@
+<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0A1A2F;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1E3A5F;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Fond bleu -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  
+  <!-- Logo ArtisanFlow centré -->
+  <g transform="translate(500, 140)">
+    <rect width="200" height="200" fill="#3B82F6" rx="24"/>
+    <path d="M 100 40 L 60 160 L 80 160 L 95 120 L 105 120 L 120 160 L 140 160 Z" fill="white"/>
+    <path d="M 95 100 L 100 80 L 105 100 Z" fill="#3B82F6"/>
+  </g>
+  
+  <!-- Texte principal -->
+  <text x="600" y="420" 
+        font-family="Arial, sans-serif" 
+        font-size="48" 
+        font-weight="bold" 
+        fill="white" 
+        text-anchor="middle">
+    Devis en 20 secondes avec l'IA
+  </text>
+  
+  <!-- Sous-texte -->
+  <text x="600" y="480" 
+        font-family="Arial, sans-serif" 
+        font-size="24" 
+        fill="#E2E8F0" 
+        text-anchor="middle">
+    Application pour artisans • Simple, rapide, puissant
+  </text>
+</svg>
+

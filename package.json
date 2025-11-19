@@ -24,7 +24,8 @@
     "build": "next build",
     "next:start": "next start",
     "lint": "next lint",
-    "vercel-build": "next build"
+    "vercel-build": "next build",
+    "generate:seo": "node scripts/generate-seo-assets.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -62,6 +63,7 @@
     "expo-image-picker": "~17.0.8",
     "expo-linking": "~8.0.8",
     "expo-location": "~19.0.7",
+    "expo-mail-composer": "~15.0.7",
     "expo-network": "~8.0.7",
     "expo-notifications": "~0.32.12",
     "expo-print": "~15.0.7",

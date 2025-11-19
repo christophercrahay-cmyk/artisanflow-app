@@ -1,0 +1,28 @@
+{
+  "name": "ArtisanFlow – Devis en 20 secondes avec l'IA",
+  "short_name": "ArtisanFlow",
+  "description": "Application pour artisans : créez devis et factures en 20 secondes, gérez vos chantiers, vos photos, vos clients et vos signatures électroniques.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A1A2F",
+  "theme_color": "#0A1A2F",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon-16.png",
+      "sizes": "16x16",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
+

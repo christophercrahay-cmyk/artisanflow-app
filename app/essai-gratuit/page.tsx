@@ -5,7 +5,6 @@ import { Container } from '@/components/layout/Container';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { AnimatedSection } from '@/components/ui/AnimatedSection';
-import type { Metadata } from 'next';
 
 export default function EssaiGratuitPage() {
   const [email, setEmail] = useState('');
