@@ -27,14 +27,19 @@ export async function generateMetadata({
     };
   }
 
+  // Guards pour éviter les erreurs undefined
+  const projectName = project.name || 'Chantier';
+  const clientName = project.client?.name || 'Client';
+  const photos = project.photos || [];
+
   return {
-    title: `Chantier ${project.name} - ${project.client.name}`,
+    title: `Chantier ${projectName} - ${clientName}`,
     description: 'Suivez l\'avancement de votre chantier en temps réel',
     openGraph: {
-      title: `Chantier ${project.name}`,
-      description: `Suivi du chantier pour ${project.client.name}`,
-      images: project.photos.length > 0
-        ? [{ url: project.photos[0].url }]
+      title: `Chantier ${projectName}`,
+      description: `Suivi du chantier pour ${clientName}`,
+      images: photos.length > 0 && photos[0]?.url
+        ? [{ url: photos[0].url }]
         : [],
     },
   };
@@ -53,13 +58,16 @@ export default async function ChantierPage({ params }: PageProps) {
     );
   }
 
-  // Check if project has been revoked (you might need to add this check in your RPC)
-  // For now, we'll assume if we get data, it's valid
+  // Guards pour éviter les erreurs undefined
+  const photos = project.photos || [];
+  const devis = project.devis || [];
+  const factures = project.factures || [];
+  const client = project.client || { name: 'Client' };
 
   const hasContent =
-    project.photos.length > 0 ||
-    project.devis.length > 0 ||
-    project.factures.length > 0;
+    photos.length > 0 ||
+    devis.length > 0 ||
+    factures.length > 0;
 
   if (!hasContent) {
     return (
@@ -75,7 +83,7 @@ export default async function ChantierPage({ params }: PageProps) {
             </Link>
           </div>
           <ProjectHeader project={project} />
-          <ClientInfo client={project.client} />
+          <ClientInfo client={client} />
           <EmptyState />
         </div>
       </div>
@@ -113,39 +121,41 @@ export default async function ChantierPage({ params }: PageProps) {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <ProjectHeader project={project} />
-        <ClientInfo client={project.client} />
+        <ClientInfo client={client} />
 
         {/* Photos Section */}
-        <section className="mb-12">
-          <h2 className="text-2xl font-bold text-slate-100 mb-6">
-            📸 Photos du chantier ({project.photos.length})
-          </h2>
-          <PhotosGrid photos={project.photos} />
-        </section>
-
-        {/* Quotes Section */}
-        {project.devis.length > 0 && (
+        {photos.length > 0 && (
           <section className="mb-12">
             <h2 className="text-2xl font-bold text-slate-100 mb-6">
-              📄 Devis ({project.devis.length})
+              📸 Photos du chantier ({photos.length})
+            </h2>
+            <PhotosGrid photos={photos} />
+          </section>
+        )}
+
+        {/* Quotes Section */}
+        {devis.length > 0 && (
+          <section className="mb-12">
+            <h2 className="text-2xl font-bold text-slate-100 mb-6">
+              📄 Devis ({devis.length})
             </h2>
             <DocumentsList
               title="Devis"
-              documents={project.devis}
+              documents={devis}
               type="quote"
             />
           </section>
         )}
 
         {/* Invoices Section */}
-        {project.factures.length > 0 && (
+        {factures.length > 0 && (
           <section className="mb-12">
             <h2 className="text-2xl font-bold text-slate-100 mb-6">
-              💰 Factures ({project.factures.length})
+              💰 Factures ({factures.length})
             </h2>
             <DocumentsList
               title="Factures"
-              documents={project.factures}
+              documents={factures}
               type="invoice"
             />
           </section>
