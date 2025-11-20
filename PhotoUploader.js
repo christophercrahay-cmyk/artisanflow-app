@@ -147,7 +147,7 @@ export default function PhotoUploader({ projectId }) {
   const pickAndUpload = async () => {
     const { currentClient, currentProject } = useAppStore.getState();
     if (!currentProject?.id || !currentClient?.id) {
-      Alert.alert('Sélection manquante', 'Sélectionne d\'abord un client et un chantier');
+      showError('Sélectionne d\'abord un client et un chantier');
       return;
     }
 
@@ -161,7 +161,7 @@ export default function PhotoUploader({ projectId }) {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission refusée', 'Autorise l\'accès à la caméra');
+        showError('Autorise l\'accès à la caméra');
         return;
       }
 
@@ -207,7 +207,7 @@ export default function PhotoUploader({ projectId }) {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission refusée', 'Autorise l\'accès à la galerie');
+        showError('Autorise l\'accès à la galerie');
         return;
       }
 

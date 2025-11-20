@@ -14,6 +14,7 @@ import * as Sharing from 'expo-sharing';
 import { supabase } from './supabaseClient';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useAppStore } from './store/useAppStore';
+import { showSuccess, showError } from './components/Toast';
 
 // Whisper.rn est un module natif - pas disponible dans Expo Go
 let initWhisper = null;
@@ -113,13 +114,13 @@ export default function DevisFactures({ projectId, clientId, type = 'devis', nav
       
       if (error) {
         console.error(`Erreur chargement ${type}:`, error);
-        Alert.alert('Erreur', `Impossible de charger les ${type}s`);
+        showError(`Impossible de charger les ${type}s`);
         return;
       }
       setItems(data || []);
     } catch (err) {
       console.error(`Exception chargement ${type}:`, err);
-      Alert.alert('Erreur', `Erreur lors du chargement des ${type}s`);
+      showError(`Erreur lors du chargement des ${type}s`);
     }
   };
 
@@ -201,20 +202,20 @@ export default function DevisFactures({ projectId, clientId, type = 'devis', nav
 
   const saveItem = async () => {
     if (!numero.trim()) {
-      Alert.alert('Champs requis', 'Le numéro est obligatoire.');
+      showError('Le numéro est obligatoire');
       return;
     }
     
     const montantHT = parseFloat(montant);
     if (isNaN(montantHT) || montantHT <= 0) {
-      Alert.alert('Montant invalide', 'Le montant doit être supérieur à 0.');
+      showError('Le montant doit être supérieur à 0');
       return;
     }
 
     // Vérifier les sélections dans le store
     const { currentClient, currentProject } = useAppStore.getState();
     if (!currentClient?.id) {
-      Alert.alert('Client manquant', 'Sélectionne un client');
+      showError('Sélectionne un client');
       return;
     }
 
@@ -269,12 +270,12 @@ export default function DevisFactures({ projectId, clientId, type = 'devis', nav
 
       if (error) {throw error;}
 
-      Alert.alert('OK', editingId ? `${isDevis ? 'Devis' : 'Facture'} modifié ✅` : `${isDevis ? 'Devis' : 'Facture'} créé ✅`);
+      showSuccess(editingId ? `${isDevis ? 'Devis' : 'Facture'} modifié` : `${isDevis ? 'Devis' : 'Facture'} créé`);
       resetForm();
       await loadItems();
     } catch (err) {
       console.error(`Erreur sauvegarde ${type}:`, err);
-      Alert.alert('Erreur', err.message || 'Impossible de sauvegarder');
+      showError(err.message || 'Impossible de sauvegarder');
     } finally {
       setUploading(false);
     }
@@ -284,7 +285,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis', nav
     try {
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Micro refusé', 'Active le micro dans les réglages.');
+        showError('Active le micro dans les réglages');
         return;
       }
 
@@ -302,7 +303,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis', nav
       setRecording(recording);
     } catch (e) {
       console.error('Erreur startRecording:', e);
-      Alert.alert('Erreur', 'Impossible de démarrer l\'enregistrement');
+      showError('Impossible de démarrer l\'enregistrement');
     }
   };
 
@@ -404,7 +405,7 @@ export default function DevisFactures({ projectId, clientId, type = 'devis', nav
           .single();
 
         if (devisError || !devis) {
-          Alert.alert('Erreur', 'Devis introuvable');
+          showError('Devis introuvable');
           return;
         }
 
@@ -413,12 +414,12 @@ export default function DevisFactures({ projectId, clientId, type = 'devis', nav
         
         // Vérifier si le devis peut être supprimé
         if (!canDeleteDevis(devis.statut)) {
-          Alert.alert('🔒 Devis verrouillé', getDevisLockMessage(devis.statut));
+          showError(getDevisLockMessage(devis.statut));
           return;
         }
       } catch (error) {
         console.error('Erreur vérification statut devis:', error);
-        Alert.alert('Erreur', 'Impossible de vérifier le statut du devis');
+        showError('Impossible de vérifier le statut du devis');
         return;
       }
     }
@@ -437,24 +438,24 @@ export default function DevisFactures({ projectId, clientId, type = 'devis', nav
               
               if (result.success) {
                 await loadItems();
-                Alert.alert('OK', 'Devis supprimé ✅');
+                showSuccess('Devis supprimé');
               } else {
-                Alert.alert('Erreur', result.error || 'Impossible de supprimer le devis');
+                showError(result.error || 'Impossible de supprimer le devis');
               }
             } else {
               // Pour les factures, suppression directe (pas de protection pour l'instant)
               const { error } = await supabase.from('factures').delete().eq('id', id);
               if (error) {
                 console.error(`Erreur suppression ${type}:`, error);
-                Alert.alert('Erreur', `Impossible de supprimer le ${type}`);
+                showError(`Impossible de supprimer le ${type}`);
                 return;
               }
               await loadItems();
-              Alert.alert('OK', 'Facture supprimée ✅');
+              showSuccess('Facture supprimée');
             }
           } catch (err) {
             console.error(`Exception suppression ${type}:`, err);
-            Alert.alert('Erreur', 'Erreur lors de la suppression');
+            showError('Erreur lors de la suppression');
           }
         },
       },

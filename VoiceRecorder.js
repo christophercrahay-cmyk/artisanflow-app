@@ -80,7 +80,7 @@ export default function VoiceRecorder({ projectId }) {
       // ✅ Récupérer l'utilisateur connecté pour isolation multi-tenant
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert('Erreur', 'Utilisateur non authentifié');
+        showError('Utilisateur non authentifié');
         return;
       }
 
@@ -93,13 +93,13 @@ export default function VoiceRecorder({ projectId }) {
       
       if (error) {
         logger.error('VoiceRecorder', 'Erreur chargement notes', { status, error });
-        Alert.alert('Erreur', 'Impossible de charger les notes');
+        showError('Impossible de charger les notes');
         return;
       }
       setItems(data || []);
     } catch (err) {
       logger.error('VoiceRecorder', 'Exception chargement notes', err);
-      Alert.alert('Erreur', 'Erreur lors du chargement des notes');
+      showError('Erreur lors du chargement des notes');
     }
   };
 
@@ -126,7 +126,7 @@ export default function VoiceRecorder({ projectId }) {
       logger.info('VoiceRecorder', `Permission audio status: ${audioStatus}`);
       
       if (audioStatus !== 'granted') {
-        Alert.alert('Micro refusé', 'Active le micro dans les réglages.');
+        showError('Active le micro dans les réglages');
         return;
       }
 
@@ -158,7 +158,7 @@ export default function VoiceRecorder({ projectId }) {
 
     } catch (e) {
       logger.error('VoiceRecorder', 'Erreur démarrage enregistrement', e);
-      Alert.alert('Erreur', e?.message || 'Impossible de démarrer.');
+      showError(e?.message || 'Impossible de démarrer');
     }
   };
 
@@ -252,17 +252,20 @@ export default function VoiceRecorder({ projectId }) {
       }
     } catch (e) {
       logger.error('VoiceRecorder', 'Erreur arrêt enregistrement', e);
-      Alert.alert('Erreur', e?.message || 'Stop impossible.');
+      showError(e?.message || 'Stop impossible');
     }
   };
 
   const uploadAndSave = async () => {
-    if (!recordUri) {return Alert.alert('Aucun enregistrement', 'Enregistre d\'abord.');}
+    if (!recordUri) {
+      showError('Enregistre d\'abord');
+      return;
+    }
 
     // Vérifier les sélections dans le store
     const { currentClient, currentProject } = useAppStore.getState();
     if (!currentProject?.id || !currentClient?.id) {
-      Alert.alert('Sélection manquante', 'Sélectionne d\'abord un client et un chantier');
+      showError('Sélectionne d\'abord un client et un chantier');
       return;
     }
 
@@ -475,8 +478,7 @@ export default function VoiceRecorder({ projectId }) {
       Alert.alert(alertTitle, alertMessage);
       */
 
-      // Alerte simple de confirmation
-      Alert.alert('✅ Note vocale envoyée', transcribedText || 'Note vocale sauvegardée avec succès');
+      // Toast de confirmation (déjà affiché ligne 424)
 
     } catch (e) {
       logger.error('VoiceRecorder', 'Erreur uploadAndSave', e);
@@ -537,7 +539,7 @@ export default function VoiceRecorder({ projectId }) {
       });
     } catch (e) {
       logger.error('VoiceRecorder', 'Erreur play', e);
-      Alert.alert('Lecture impossible', e?.message || 'Erreur de lecture.');
+      showError(e?.message || 'Erreur de lecture');
     }
   };
 
